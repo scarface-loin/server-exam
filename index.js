@@ -1,5 +1,89 @@
-// Remplace toute la route app.get('/admin' ...) par ceci :
+// ========================================
+// FICHIER index.js COMPLET
+// ========================================
 
+const express = require('express');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Chemin vers le fichier de données
+const DATA_FILE = path.join(__dirname, 'students.json');
+
+// Fonction pour lire les données
+function getStudents() {
+    try {
+        if (!fs.existsSync(DATA_FILE)) {
+            fs.writeFileSync(DATA_FILE, JSON.stringify({}));
+            return {};
+        }
+        const data = fs.readFileSync(DATA_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.error('Erreur lecture fichier:', error);
+        return {};
+    }
+}
+
+// Fonction pour sauvegarder les données
+function saveStudents(data) {
+    try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        return true;
+    } catch (error) {
+        console.error('Erreur écriture fichier:', error);
+        return false;
+    }
+}
+
+// ========================================
+// ROUTE: Soumettre les résultats
+// ========================================
+app.post('/api/submit', (req, res) => {
+    const { phone, score, total, answers } = req.body;
+
+    if (!phone) {
+        return res.status(400).json({ error: 'Téléphone requis' });
+    }
+
+    const students = getStudents();
+    
+    // Chercher l'étudiant par téléphone
+    let studentKey = null;
+    for (const key in students) {
+        if (students[key].phone === phone) {
+            studentKey = key;
+            break;
+        }
+    }
+
+    if (studentKey) {
+        // Mettre à jour les réponses
+        students[studentKey].answers = answers;
+        students[studentKey].score = score;
+        students[studentKey].total = total;
+        students[studentKey].submittedAt = new Date().toISOString();
+        
+        if (saveStudents(students)) {
+            res.json({ success: true, message: 'Résultats enregistrés' });
+        } else {
+            res.status(500).json({ error: 'Erreur sauvegarde' });
+        }
+    } else {
+        res.status(404).json({ error: 'Étudiant non trouvé' });
+    }
+});
+
+// ========================================
+// ROUTE ADMIN - PAGE DES RÉSULTATS
+// ========================================
 app.get('/admin', (req, res) => {
     // 1. On récupère les données à jour
     const studentsObj = getStudents();
@@ -32,7 +116,6 @@ app.get('/admin', (req, res) => {
             margin: 0 auto;
         }
 
-        /* Header */
         .header {
             background: white;
             border-radius: 16px;
@@ -72,7 +155,6 @@ app.get('/admin', (req, res) => {
             font-weight: bold;
         }
 
-        /* Légende */
         .legend {
             background: white;
             border-radius: 12px;
@@ -97,7 +179,6 @@ app.get('/admin', (req, res) => {
             border-radius: 4px;
         }
 
-        /* Student Cards */
         .student-list {
             display: flex;
             flex-direction: column;
@@ -234,7 +315,6 @@ app.get('/admin', (req, res) => {
             font-weight: bold;
         }
 
-        /* Empty state */
         .no-answers {
             padding: 20px;
             text-align: center;
@@ -245,7 +325,6 @@ app.get('/admin', (req, res) => {
             margin: 12px 16px;
         }
 
-        /* Filters */
         .filters {
             background: white;
             border-radius: 12px;
@@ -279,7 +358,6 @@ app.get('/admin', (req, res) => {
             border-color: transparent;
         }
 
-        /* Desktop adjustments */
         @media (min-width: 768px) {
             .container {
                 max-width: 1200px;
@@ -313,7 +391,6 @@ app.get('/admin', (req, res) => {
 <body>
 
 <div class="container">
-    <!-- Header avec stats -->
     <div class="header">
         <h1>📊 Résultats Telc B1</h1>
         <div class="stats-grid">
@@ -336,7 +413,6 @@ app.get('/admin', (req, res) => {
         </div>
     </div>
 
-    <!-- Légende -->
     <div class="legend">
         <div class="legend-item">
             <div class="legend-box" style="background: linear-gradient(135deg, #10b981, #059669)"></div>
@@ -352,7 +428,6 @@ app.get('/admin', (req, res) => {
         </div>
     </div>
 
-    <!-- Filtres -->
     <div class="filters">
         <div class="filter-buttons">
             <button class="filter-btn active" onclick="filterResults('all')">Tous</button>
@@ -363,12 +438,10 @@ app.get('/admin', (req, res) => {
         </div>
     </div>
 
-    <!-- Liste des élèves -->
     <div class="student-list" id="studentList"></div>
 </div>
 
 <script>
-    // Les données viennent du serveur Node.js
     const studentsData = ${JSON.stringify(studentsArray)};
 
     const solutionKey = {
@@ -420,7 +493,7 @@ app.get('/admin', (req, res) => {
 
     function renderStudentCard(student, scoreData) {
         const { score, details } = scoreData;
-        const hasAnswers = Object.keys(student.answers).length > 0;
+        const hasAnswers = Object.keys(student.answers || {}).length > 0;
         
         let badgeClass = "score-low";
         if(score >= 35) badgeClass = "score-high";
@@ -489,10 +562,9 @@ app.get('/admin', (req, res) => {
             return { ...student, ...scoreData };
         });
 
-        // Stats
         const totalStudents = allStudentsWithScores.length;
-        const answeredStudents = allStudentsWithScores.filter(s => Object.keys(s.answers).length > 0).length;
-        const scores = allStudentsWithScores.filter(s => Object.keys(s.answers).length > 0).map(s => s.score);
+        const answeredStudents = allStudentsWithScores.filter(s => Object.keys(s.answers || {}).length > 0).length;
+        const scores = allStudentsWithScores.filter(s => Object.keys(s.answers || {}).length > 0).map(s => s.score);
         const avgScore = scores.length > 0 ? (scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(1) : 0;
         const bestScore = scores.length > 0 ? Math.max(...scores) : 0;
 
@@ -501,7 +573,6 @@ app.get('/admin', (req, res) => {
         document.getElementById('avgScore').textContent = avgScore;
         document.getElementById('bestScore').textContent = bestScore;
 
-        // Tri par score décroissant
         allStudentsWithScores.sort((a, b) => b.score - a.score);
 
         allStudentsWithScores.forEach(student => {
@@ -546,4 +617,12 @@ app.get('/admin', (req, res) => {
 </html>`;
 
     res.send(html);
+});
+
+// ========================================
+// DÉMARRAGE DU SERVEUR
+// ========================================
+app.listen(PORT, () => {
+    console.log('🚀 Serveur démarré sur http://localhost:' + PORT);
+    console.log('📊 Page admin: http://localhost:' + PORT + '/admin');
 });
