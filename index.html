@@ -1,12 +1,4 @@
-// Remplace toute la route app.get('/admin' ...) par ceci :
-
-app.get('/admin', (req, res) => {
-    // 1. On récupère les données à jour
-    const studentsObj = getStudents();
-    const studentsArray = Object.values(studentsObj);
-
-    // 2. On prépare le HTML avec les vraies données
-    const html = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
@@ -368,8 +360,38 @@ app.get('/admin', (req, res) => {
 </div>
 
 <script>
-    // Les données viennent du serveur Node.js
-    const studentsData = ${JSON.stringify(studentsArray)};
+    const studentsData = [
+      { "name": "Murielle ", "phone": "57160356", "answers": { "1": "c", "2": "j", "3": "h", "4": "a", "5": "i", "11": "D", "12": "H", "13": "J", "14": "H", "15": "F", "16": "C", "17": "E", "18": "F", "19": "A", "20": "C" } },
+      { "name": "Ngouekui Elessa carelke", "phone": "640014356", "answers": { "1": "h", "2": "f", "3": "c", "4": "a", "5": "d" } },
+      { "name": "stevesoft", "phone": "650892780", "answers": {} },
+      { "name": "Yvana Sorem", "phone": "653336769", "answers": {} },
+      { "name": "Mamno arianne", "phone": "655414398", "answers": {} },
+      { "name": "Arland jean", "phone": "655894529", "answers": {} },
+      { "name": "Donpe kamdem Kendra ", "phone": "656392256", "answers": { "1": "h", "2": "d", "3": "a", "4": "d", "5": "i" } },
+      { "name": "Sonwa belviane ", "phone": "658694852", "answers": {} },
+      { "name": "Mabelle", "phone": "658819968", "answers": {} },
+      { "name": "Yiagnigni Mariama ", "phone": "671261314", "answers": { "1": "d", "2": "a", "3": "c", "4": "i", "5": "a", "11": "K", "12": "H", "13": "x", "14": "B", "15": "F", "16": "A", "17": "E", "18": "x", "19": "A", "20": "C" } },
+      { "name": "Manboy", "phone": "674148151", "answers": { "1": "b", "2": "f", "3": "c", "4": "a", "5": "d", "11": "D", "12": "L", "13": "H", "14": "J", "15": "G", "16": "B", "18": "K", "19": "A", "20": "C" } },
+      { "name": "Mbeleck Manuel Florent Rene", "phone": "674307121", "answers": {} },
+      { "name": "Mbappe ", "phone": "677307487", "answers": { "1": "a", "2": "b", "3": "c", "4": "c", "5": "d" } },
+      { "name": "Heudou ariane", "phone": "680350112", "answers": {} },
+      { "name": "Mapitsop fopa Ange charone ", "phone": "683198041", "answers": { "1": "b", "2": "f", "3": "c", "4": "a", "5": "i", "11": "I", "12": "J", "13": "L", "14": "H", "15": "F", "16": "G", "17": "C", "18": "K", "19": "A", "20": "B" } },
+      { "name": "Brayan ngueleu ", "phone": "683239008", "answers": {} },
+      { "name": "Chico ", "phone": "686078616", "answers": {} },
+      { "name": "Djoulefack tsana Brionne ", "phone": "686563539", "answers": {} },
+      { "name": "José Rabi", "phone": "690842858", "answers": {} },
+      { "name": "Deuco Mélissa ", "phone": "691351889", "answers": {} },
+      { "name": "VOUGMO YEMELE RAYELLE ", "phone": "691381769", "answers": { "1": "b", "2": "f", "3": "g", "4": "a", "5": "d", "11": "D", "12": "H", "13": "J", "14": "E", "15": "F", "16": "B", "17": "x", "18": "G", "19": "A", "20": "C" } },
+      { "name": "MEPONDJOU TSAGUE CLAUVINETTE ", "phone": "691881482", "answers": { "1": "f", "2": "i", "3": "a", "4": "d", "5": "c" } },
+      { "name": "Maïlova", "phone": "694734474", "answers": {} },
+      { "name": "Ange serena Akedi", "phone": "694779950", "answers": {} },
+      { "name": "Romy", "phone": "695008777", "answers": {} },
+      { "name": "Loic", "phone": "695068073", "answers": { "11": "x", "12": "J", "13": "J", "14": "H", "15": "G", "16": "B", "17": "x", "18": "x", "19": "A", "20": "C" } },
+      { "name": "Sarbe Hamadama ", "phone": "696586363", "answers": { "1": "b", "2": "f", "3": "g", "4": "a", "5": "j", "11": "D", "12": "H", "13": "J", "14": "x", "15": "F", "16": "B", "17": "E", "18": "G", "19": "A", "20": "C" } },
+      { "name": "Boris", "phone": "697898974", "answers": { "11": "F", "12": "L", "13": "J", "14": "H", "15": "A", "16": "B", "17": "E", "18": "x", "19": "F", "20": "D" } },
+      { "name": "Kelly ", "phone": "698769367", "answers": {} },
+      { "name": "Soraya Tcheutchoua", "phone": "698899888", "answers": { "1": "b", "2": "f", "3": "c", "4": "a", "5": "i" } }
+    ];
 
     const solutionKey = {
         "1": "h", "2": "f", "3": "c", "4": "a", "5": "d",
@@ -426,57 +448,57 @@ app.get('/admin', (req, res) => {
         if(score >= 35) badgeClass = "score-high";
         else if(score >= 20) badgeClass = "score-med";
 
-        let html = \`
-            <div class="student-card" data-score="\${score}" data-answered="\${hasAnswers}">
+        let html = `
+            <div class="student-card" data-score="${score}" data-answered="${hasAnswers}">
                 <div class="student-header">
-                    <div class="student-name">\${student.name}</div>
-                    <div class="student-phone">📱 \${student.phone}</div>
+                    <div class="student-name">${student.name}</div>
+                    <div class="student-phone">📱 ${student.phone}</div>
                 </div>
                 <div class="score-section">
                     <span style="font-weight: 600; color: #6b7280;">Note finale</span>
-                    <span class="score-badge \${badgeClass}">\${score}/50</span>
+                    <span class="score-badge ${badgeClass}">${score}/50</span>
                 </div>
-        \`;
+        `;
 
         if(hasAnswers) {
-            html += \`
+            html += `
                 <div class="answers-section">
                     <div class="section-title">Partie 1 (5 pts/q)</div>
                     <div class="answer-grid">
-            \`;
+            `;
             
             details.part1.forEach(item => {
                 const className = item.answer === "-" ? "ans-empty" : (item.correct ? "ans-correct" : "ans-wrong");
-                html += \`
-                    <div class="ans-box \${className}">
-                        <span class="question-label">\${item.q}</span>
-                        \${item.answer.toUpperCase()}
+                html += `
+                    <div class="ans-box ${className}">
+                        <span class="question-label">${item.q}</span>
+                        ${item.answer.toUpperCase()}
                     </div>
-                \`;
+                `;
             });
 
-            html += \`
+            html += `
                     </div>
                     <div class="section-title">Partie 3 (2.5 pts/q)</div>
                     <div class="answer-grid">
-            \`;
+            `;
 
             details.part3.forEach(item => {
                 const className = item.answer === "-" ? "ans-empty" : (item.correct ? "ans-correct" : "ans-wrong");
-                html += \`
-                    <div class="ans-box \${className}">
-                        <span class="question-label">\${item.q}</span>
-                        \${item.answer.toUpperCase()}
+                html += `
+                    <div class="ans-box ${className}">
+                        <span class="question-label">${item.q}</span>
+                        ${item.answer.toUpperCase()}
                     </div>
-                \`;
+                `;
             });
 
-            html += \`</div></div>\`;
+            html += `</div></div>`;
         } else {
-            html += \`<div class="no-answers">❌ Aucune réponse enregistrée</div>\`;
+            html += `<div class="no-answers">❌ Aucune réponse enregistrée</div>`;
         }
 
-        html += \`</div>\`;
+        html += `</div>`;
         return html;
     }
 
@@ -543,7 +565,4 @@ app.get('/admin', (req, res) => {
 </script>
 
 </body>
-</html>`;
-
-    res.send(html);
-});
+</html>
