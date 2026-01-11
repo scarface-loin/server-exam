@@ -723,12 +723,12 @@ app.get('/admin', async (req, res) => {
         function connect() {
             ws = new WebSocket(wsUrl);
             
-            ws.onopen = () => {
+            ws.onopen = function() {
                 console.log('✅ Connecté');
                 document.getElementById('connection-dot').classList.add('connected');
             };
             
-            ws.onmessage = (event) => {
+            ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'time_update') {
@@ -740,7 +740,7 @@ app.get('/admin', async (req, res) => {
                 }
             };
             
-            ws.onclose = () => {
+            ws.onclose = function() {
                 console.log('🔌 Déconnecté');
                 document.getElementById('connection-dot').classList.remove('connected');
                 setTimeout(connect, 3000);
@@ -750,7 +750,7 @@ app.get('/admin', async (req, res) => {
         function updateTimer() {
             const minutes = Math.floor(timeRemaining / 60000);
             const seconds = Math.floor((timeRemaining % 60000) / 1000);
-            const display = \`\${minutes.toString().padStart(2, '0')}:\${seconds.toString().padStart(2, '0')}\`;
+            const display = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
             
             document.getElementById('timer-display').textContent = display;
             
@@ -759,8 +759,8 @@ app.get('/admin', async (req, res) => {
         }
 
         function updateStudents(students) {
-            const active = students.filter(s => s.status === 'active').length;
-            const submitted = students.filter(s => s.status === 'submitted').length;
+            const active = students.filter(function(s) { return s.status === 'active'; }).length;
+            const submitted = students.filter(function(s) { return s.status === 'submitted'; }).length;
             
             document.getElementById('active-count').textContent = active;
             document.getElementById('submitted-count').textContent = submitted;
@@ -772,9 +772,10 @@ app.get('/admin', async (req, res) => {
                 return;
             }
             
-            list.innerHTML = students.map(s => {
+            let html = '';
+            students.forEach(function(s) {
                 const elapsed = Math.floor((Date.now() - s.lastActivity) / 1000);
-                const timeAgo = elapsed < 60 ? \`\${elapsed}s\` : \`\${Math.floor(elapsed/60)}min\`;
+                const timeAgo = elapsed < 60 ? elapsed + 's' : Math.floor(elapsed/60) + 'min';
                 
                 let badgeClass = 'badge-connected';
                 let badgeText = 'Connecté';
@@ -790,21 +791,21 @@ app.get('/admin', async (req, res) => {
                     cardClass = 'submitted';
                 }
                 
-                return \`
-                    <div class="student-card \${cardClass}">
-                        <div class="student-header">
-                            <div class="student-name">\${s.name}</div>
-                            <span class="badge \${badgeClass}">\${badgeText}</span>
-                        </div>
-                        <div class="student-info">
-                            📱 \${s.phone}<br>
-                            ⏰ Actif il y a \${timeAgo}
-                            \${s.currentExam ? \`<br>📝 \${s.currentExam}\` : ''}
-                            \${s.score ? \`<br>🎯 \${s.score}\` : ''}
-                        </div>
-                    </div>
-                \`;
-            }).join('');
+                html += '<div class="student-card ' + cardClass + '">';
+                html += '<div class="student-header">';
+                html += '<div class="student-name">' + s.name + '</div>';
+                html += '<span class="badge ' + badgeClass + '">' + badgeText + '</span>';
+                html += '</div>';
+                html += '<div class="student-info">';
+                html += '📱 ' + s.phone + '<br>';
+                html += '⏰ Actif il y a ' + timeAgo;
+                if (s.currentExam) html += '<br>📝 ' + s.currentExam;
+                if (s.score) html += '<br>🎯 ' + s.score;
+                html += '</div>';
+                html += '</div>';
+            });
+            
+            list.innerHTML = html;
         }
 
         async function startExam() {
@@ -819,7 +820,7 @@ app.get('/admin', async (req, res) => {
                 const res = await fetch('/admin/configure', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ durationMinutes })
+                    body: JSON.stringify({ durationMinutes: durationMinutes })
                 });
                 
                 if (res.ok) {
@@ -831,7 +832,7 @@ app.get('/admin', async (req, res) => {
         }
 
         async function resetExam() {
-            if (!confirm('Réinitialiser l\'examen ?')) return;
+            if (!confirm('Réinitialiser l\\'examen ?')) return;
             
             try {
                 const res = await fetch('/admin/reset', {
