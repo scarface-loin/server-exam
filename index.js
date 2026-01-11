@@ -9,6 +9,12 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware de logging
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -149,23 +155,31 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/submit', async (req, res) => {
     try {
-        const { phone, exam_id, score, total, answers } = req.body;
+        console.log('📥 Réception submit:', req.body);
+        const { phone, exam_id, score, total, answers, student_name } = req.body;
         
         if (!phone || !exam_id) {
+            console.error('❌ Données manquantes:', { phone, exam_id });
             return res.status(400).json({ error: 'Téléphone et ID examen requis' });
         }
 
-        // Trouver l'étudiant
-        const studentResult = await pool.query(
+        // Trouver ou créer l'étudiant (au cas où il n'existe pas)
+        let studentResult = await pool.query(
             'SELECT id FROM students WHERE phone = $1',
             [phone]
         );
 
+        let studentId;
         if (studentResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Étudiant non trouvé' });
+            console.log('⚠️ Étudiant non trouvé, création automatique');
+            const insertResult = await pool.query(
+                'INSERT INTO students (name, phone) VALUES ($1, $2) RETURNING id',
+                [student_name || 'Anonyme', phone]
+            );
+            studentId = insertResult.rows[0].id;
+        } else {
+            studentId = studentResult.rows[0].id;
         }
-
-        const studentId = studentResult.rows[0].id;
 
         // Enregistrer le résultat
         await pool.query(
@@ -176,13 +190,14 @@ app.post('/api/submit', async (req, res) => {
             [studentId, exam_id, score, total, JSON.stringify(answers)]
         );
 
+        console.log('✅ Résultat enregistré pour:', exam_id);
         res.json({ 
             success: true, 
             message: `Résultats pour ${exam_id} enregistrés.` 
         });
     } catch (error) {
-        console.error('Erreur /api/submit:', error);
-        res.status(500).json({ error: 'Erreur serveur' });
+        console.error('❌ Erreur /api/submit:', error);
+        res.status(500).json({ error: 'Erreur serveur', details: error.message });
     }
 });
 
