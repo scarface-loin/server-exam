@@ -31,15 +31,60 @@ const pool = new Pool({
 // --- INITIALISATION DE LA BASE DE DONNÉES ---
 async function initDatabase() {
     try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS exam_state (
-                id INTEGER PRIMARY KEY DEFAULT 1,
-                start_time TIMESTAMP,
-                duration_minutes INTEGER DEFAULT 60,
-                CHECK (id = 1)
-            )
+        // Vérifier si la table exam_state existe
+        const tableCheck = await pool.query(`
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'exam_state'
+            );
         `);
+        
+        const tableExists = tableCheck.rows[0].exists;
+        
+        if (tableExists) {
+            // Vérifier si la colonne duration_minutes existe
+            const columnCheck = await pool.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'exam_state' 
+                    AND column_name = 'duration_minutes'
+                );
+            `);
+            
+            const columnExists = columnCheck.rows[0].exists;
+            
+            if (!columnExists) {
+                console.log('🔄 Migration: Ajout de la colonne duration_minutes...');
+                
+                // Supprimer les anciennes colonnes si elles existent
+                await pool.query(`
+                    ALTER TABLE exam_state 
+                    DROP COLUMN IF EXISTS status,
+                    DROP COLUMN IF EXISTS duration_b1,
+                    DROP COLUMN IF EXISTS duration_b2
+                `);
+                
+                // Ajouter la nouvelle colonne
+                await pool.query(`
+                    ALTER TABLE exam_state 
+                    ADD COLUMN duration_minutes INTEGER DEFAULT 60
+                `);
+                
+                console.log('✅ Migration réussie!');
+            }
+        } else {
+            // Créer la table si elle n'existe pas
+            await pool.query(`
+                CREATE TABLE exam_state (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    start_time TIMESTAMP,
+                    duration_minutes INTEGER DEFAULT 60,
+                    CHECK (id = 1)
+                )
+            `);
+        }
 
+        // Tables students et results
         await pool.query(`
             CREATE TABLE IF NOT EXISTS students (
                 id SERIAL PRIMARY KEY,
@@ -62,6 +107,7 @@ async function initDatabase() {
             )
         `);
 
+        // Insérer l'état initial si nécessaire
         await pool.query(`
             INSERT INTO exam_state (id, start_time, duration_minutes)
             VALUES (1, NULL, 60)
@@ -71,6 +117,7 @@ async function initDatabase() {
         console.log('✅ Base de données initialisée');
     } catch (error) {
         console.error('❌ Erreur initialisation DB:', error);
+        console.error('Détails:', error.message);
         process.exit(1);
     }
 }
