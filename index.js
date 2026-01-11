@@ -168,6 +168,7 @@ app.get('/api/status', async (req, res) => {
         const state = result.rows[0];
         let timeRemaining = null;
         let isRunning = false;
+        let status = 'waiting';
         
         if (state.start_time) {
             const startTime = new Date(state.start_time).getTime();
@@ -175,9 +176,16 @@ app.get('/api/status', async (req, res) => {
             const elapsed = Date.now() - startTime;
             timeRemaining = Math.max(0, durationMs - elapsed);
             isRunning = timeRemaining > 0;
+            
+            if (isRunning) {
+                status = 'running';
+            } else {
+                status = 'finished';
+            }
         }
 
         res.json({
+            status,
             startTime: state.start_time,
             durationMinutes: state.duration_minutes,
             timeRemaining,
