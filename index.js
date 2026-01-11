@@ -1,5 +1,5 @@
 // ========================================
-// FICHIER index.js AVEC POSTGRESQL
+// SERVEUR AVEC DASHBOARD MOBILE ET CONFIG
 // ========================================
 
 const express = require('express');
@@ -14,13 +14,11 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
 
-// Middleware de logging
+// Middleware
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.path}`);
     next();
 });
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
@@ -33,19 +31,15 @@ const pool = new Pool({
 // --- INITIALISATION DE LA BASE DE DONNÉES ---
 async function initDatabase() {
     try {
-        // Table pour l'état de l'examen
         await pool.query(`
             CREATE TABLE IF NOT EXISTS exam_state (
                 id INTEGER PRIMARY KEY DEFAULT 1,
-                status VARCHAR(20) DEFAULT 'waiting',
                 start_time TIMESTAMP,
-                duration_b1 INTEGER DEFAULT 3600000,
-                duration_b2 INTEGER DEFAULT 4500000,
+                duration_minutes INTEGER DEFAULT 60,
                 CHECK (id = 1)
             )
         `);
 
-        // Table pour les étudiants
         await pool.query(`
             CREATE TABLE IF NOT EXISTS students (
                 id SERIAL PRIMARY KEY,
@@ -55,7 +49,6 @@ async function initDatabase() {
             )
         `);
 
-        // Table pour les résultats
         await pool.query(`
             CREATE TABLE IF NOT EXISTS results (
                 id SERIAL PRIMARY KEY,
@@ -69,16 +62,15 @@ async function initDatabase() {
             )
         `);
 
-        // Insérer l'état initial si nécessaire
         await pool.query(`
-            INSERT INTO exam_state (id, status, start_time, duration_b1, duration_b2)
-            VALUES (1, 'waiting', NULL, 3600000, 4500000)
+            INSERT INTO exam_state (id, start_time, duration_minutes)
+            VALUES (1, NULL, 60)
             ON CONFLICT (id) DO NOTHING
         `);
 
-        console.log('✅ Base de données initialisée avec succès');
+        console.log('✅ Base de données initialisée');
     } catch (error) {
-        console.error('❌ Erreur d\'initialisation de la base de données:', error);
+        console.error('❌ Erreur initialisation DB:', error);
         process.exit(1);
     }
 }
@@ -88,9 +80,8 @@ initDatabase();
 // ==========================================
 // SYSTÈME DE TRACKING EN TEMPS RÉEL
 // ==========================================
-const activeStudents = new Map(); // phone -> {name, lastActivity, currentExam, status}
+const activeStudents = new Map();
 
-// Broadcast vers tous les clients WebSocket
 function broadcastUpdate() {
     const data = JSON.stringify({
         type: 'update',
@@ -103,22 +94,55 @@ function broadcastUpdate() {
     });
 }
 
-// WebSocket connection
+// Broadcast du temps restant toutes les secondes
+async function broadcastTimeRemaining() {
+    try {
+        const result = await pool.query(
+            'SELECT start_time, duration_minutes FROM exam_state WHERE id = 1'
+        );
+        const state = result.rows[0];
+        
+        if (state.start_time) {
+            const startTime = new Date(state.start_time).getTime();
+            const durationMs = state.duration_minutes * 60 * 1000;
+            const elapsed = Date.now() - startTime;
+            const remaining = Math.max(0, durationMs - elapsed);
+            
+            const data = JSON.stringify({
+                type: 'time_update',
+                timeRemaining: remaining,
+                duration: durationMs,
+                isRunning: remaining > 0
+            });
+            
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(data);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Erreur broadcast time:', error);
+    }
+}
+
+setInterval(broadcastTimeRemaining, 1000);
+
 wss.on('connection', (ws) => {
-    console.log('👀 Admin connecté au monitoring');
+    console.log('👀 Client connecté');
     
-    // Envoyer l'état actuel immédiatement
     ws.send(JSON.stringify({
         type: 'initial',
         students: Array.from(activeStudents.values())
     }));
     
+    broadcastTimeRemaining();
+    
     ws.on('close', () => {
-        console.log('👋 Admin déconnecté du monitoring');
+        console.log('👋 Client déconnecté');
     });
 });
 
-// Nettoyage des étudiants inactifs (>5 min)
 setInterval(() => {
     const now = Date.now();
     let cleaned = false;
@@ -129,40 +153,35 @@ setInterval(() => {
         }
     });
     if (cleaned) broadcastUpdate();
-}, 30000); // Vérifier toutes les 30 secondes
+}, 30000);
 
 // ========================================
-// ROUTES API PUBLIQUES
+// ROUTES API
 // ========================================
 
 app.get('/api/status', async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT status, start_time, duration_b1, duration_b2 FROM exam_state WHERE id = 1'
+            'SELECT start_time, duration_minutes FROM exam_state WHERE id = 1'
         );
         
         const state = result.rows[0];
+        let timeRemaining = null;
+        let isRunning = false;
         
-        // Vérifier si l'examen est terminé
-        if (state.status === 'running' && state.start_time) {
-            const elapsed = Date.now() - new Date(state.start_time).getTime();
-            const maxDuration = Math.max(state.duration_b1, state.duration_b2);
-            
-            if (elapsed > maxDuration) {
-                await pool.query(
-                    "UPDATE exam_state SET status = 'finished' WHERE id = 1"
-                );
-                state.status = 'finished';
-            }
+        if (state.start_time) {
+            const startTime = new Date(state.start_time).getTime();
+            const durationMs = state.duration_minutes * 60 * 1000;
+            const elapsed = Date.now() - startTime;
+            timeRemaining = Math.max(0, durationMs - elapsed);
+            isRunning = timeRemaining > 0;
         }
 
         res.json({
-            status: state.status,
             startTime: state.start_time,
-            config: {
-                durationB1: state.duration_b1,
-                durationB2: state.duration_b2
-            }
+            durationMinutes: state.duration_minutes,
+            timeRemaining,
+            isRunning
         });
     } catch (error) {
         console.error('Erreur /api/status:', error);
@@ -178,7 +197,6 @@ app.post('/api/login', async (req, res) => {
             return res.status(400).json({ error: 'Nom et téléphone requis' });
         }
 
-        // Chercher ou créer l'étudiant
         const result = await pool.query(
             `INSERT INTO students (name, phone) 
              VALUES ($1, $2) 
@@ -190,7 +208,6 @@ app.post('/api/login', async (req, res) => {
 
         const student = result.rows[0];
 
-        // Ajouter au tracking temps réel
         activeStudents.set(phone, {
             name,
             phone,
@@ -216,15 +233,12 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/submit', async (req, res) => {
     try {
-        console.log('📥 Réception submit:', req.body);
         const { phone, exam_id, score, total, answers, student_name } = req.body;
         
         if (!phone || !exam_id) {
-            console.error('❌ Données manquantes:', { phone, exam_id });
-            return res.status(400).json({ error: 'Téléphone et ID examen requis' });
+            return res.status(400).json({ error: 'Données manquantes' });
         }
 
-        // Trouver ou créer l'étudiant (au cas où il n'existe pas)
         let studentResult = await pool.query(
             'SELECT id FROM students WHERE phone = $1',
             [phone]
@@ -232,7 +246,6 @@ app.post('/api/submit', async (req, res) => {
 
         let studentId;
         if (studentResult.rows.length === 0) {
-            console.log('⚠️ Étudiant non trouvé, création automatique');
             const insertResult = await pool.query(
                 'INSERT INTO students (name, phone) VALUES ($1, $2) RETURNING id',
                 [student_name || 'Anonyme', phone]
@@ -242,7 +255,6 @@ app.post('/api/submit', async (req, res) => {
             studentId = studentResult.rows[0].id;
         }
 
-        // Enregistrer le résultat
         await pool.query(
             `INSERT INTO results (student_id, exam_id, score, total, answers)
              VALUES ($1, $2, $3, $4, $5)
@@ -251,7 +263,6 @@ app.post('/api/submit', async (req, res) => {
             [studentId, exam_id, score, total, JSON.stringify(answers)]
         );
 
-        // Mettre à jour le statut temps réel
         if (activeStudents.has(phone)) {
             const student = activeStudents.get(phone);
             student.status = 'submitted';
@@ -261,18 +272,13 @@ app.post('/api/submit', async (req, res) => {
             broadcastUpdate();
         }
 
-        console.log('✅ Résultat enregistré pour:', exam_id);
-        res.json({ 
-            success: true, 
-            message: `Résultats pour ${exam_id} enregistrés.` 
-        });
+        res.json({ success: true });
     } catch (error) {
-        console.error('❌ Erreur /api/submit:', error);
-        res.status(500).json({ error: 'Erreur serveur', details: error.message });
+        console.error('Erreur /api/submit:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
-// Heartbeat pour tracker l'activité
 app.post('/api/heartbeat', (req, res) => {
     const { phone, exam_id } = req.body;
     if (phone && activeStudents.has(phone)) {
@@ -280,7 +286,6 @@ app.post('/api/heartbeat', (req, res) => {
         student.lastActivity = Date.now();
         student.currentExam = exam_id || student.currentExam;
         student.status = 'active';
-        // Pas de broadcast à chaque heartbeat pour économiser la bande passante
     }
     res.json({ success: true });
 });
@@ -289,42 +294,37 @@ app.post('/api/heartbeat', (req, res) => {
 // ROUTES ADMIN
 // ========================================
 
-app.get('/admin/start', async (req, res) => {
+app.post('/admin/configure', async (req, res) => {
     try {
+        const { durationMinutes } = req.body;
+        
+        if (!durationMinutes || durationMinutes < 1) {
+            return res.status(400).json({ error: 'Durée invalide' });
+        }
+
         await pool.query(
-            "UPDATE exam_state SET status = 'running', start_time = NOW() WHERE id = 1"
+            'UPDATE exam_state SET duration_minutes = $1, start_time = NOW() WHERE id = 1',
+            [durationMinutes]
         );
-        console.log('🚀 EXAMEN DÉMARRÉ !');
-        res.redirect('/admin');
+        
+        console.log(`⚙️ Examen configuré: ${durationMinutes} minutes`);
+        res.json({ success: true });
     } catch (error) {
-        console.error('Erreur start:', error);
-        res.status(500).send('Erreur');
+        console.error('Erreur configure:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
-app.get('/admin/stop', async (req, res) => {
+app.post('/admin/reset', async (req, res) => {
     try {
         await pool.query(
-            "UPDATE exam_state SET status = 'finished', start_time = NULL WHERE id = 1"
+            'UPDATE exam_state SET start_time = NULL WHERE id = 1'
         );
-        console.log('🛑 EXAMEN TERMINÉ !');
-        res.redirect('/admin');
-    } catch (error) {
-        console.error('Erreur stop:', error);
-        res.status(500).send('Erreur');
-    }
-});
-
-app.get('/admin/reset', async (req, res) => {
-    try {
-        await pool.query(
-            "UPDATE exam_state SET status = 'waiting', start_time = NULL WHERE id = 1"
-        );
-        console.log('🔄 EXAMEN RÉINITIALISÉ !');
-        res.redirect('/admin');
+        console.log('🔄 Examen réinitialisé');
+        res.json({ success: true });
     } catch (error) {
         console.error('Erreur reset:', error);
-        res.status(500).send('Erreur');
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
@@ -352,376 +352,451 @@ app.get('/admin', async (req, res) => {
         const wsUrl = `wss://${req.get('host')}`.replace('https://', 'wss://').replace('http://', 'ws://');
 
         res.send(`
-            <!DOCTYPE html>
-            <html lang="fr">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Admin - Monitoring Temps Réel</title>
-                <style>
-                    * { margin: 0; padding: 0; box-sizing: border-box; }
-                    body { 
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-                        background: #0f172a;
-                        color: #e2e8f0;
-                        padding: 20px;
-                    }
-                    .container { max-width: 1400px; margin: 0 auto; }
-                    h1 { 
-                        font-size: 2rem; 
-                        margin-bottom: 10px;
-                        background: linear-gradient(to right, #3b82f6, #8b5cf6);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                    }
-                    
-                    .status-bar { 
-                        display: flex; 
-                        gap: 20px; 
-                        margin: 30px 0;
-                        flex-wrap: wrap;
-                    }
-                    .status-card { 
-                        background: #1e293b; 
-                        padding: 20px; 
-                        border-radius: 12px;
-                        flex: 1;
-                        min-width: 200px;
-                        border: 1px solid #334155;
-                    }
-                    .status-card h3 { 
-                        font-size: 0.875rem; 
-                        color: #94a3b8; 
-                        margin-bottom: 8px;
-                        text-transform: uppercase;
-                        letter-spacing: 0.05em;
-                    }
-                    .status-card .value { 
-                        font-size: 2rem; 
-                        font-weight: 700;
-                        background: linear-gradient(to right, #10b981, #3b82f6);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                    }
-                    
-                    .exam-status { 
-                        display: inline-block;
-                        padding: 8px 16px; 
-                        border-radius: 20px; 
-                        font-weight: 600;
-                        font-size: 0.875rem;
-                        margin-bottom: 20px;
-                    }
-                    .exam-status.waiting { background: #fbbf24; color: #78350f; }
-                    .exam-status.running { background: #10b981; color: #064e3b; animation: pulse 2s infinite; }
-                    .exam-status.finished { background: #ef4444; color: #7f1d1d; }
-                    
-                    @keyframes pulse {
-                        0%, 100% { opacity: 1; }
-                        50% { opacity: 0.7; }
-                    }
-                    
-                    .controls { 
-                        display: flex; 
-                        gap: 10px; 
-                        margin-bottom: 30px;
-                        flex-wrap: wrap;
-                    }
-                    .btn { 
-                        padding: 12px 24px; 
-                        border: none;
-                        border-radius: 8px;
-                        font-weight: 600;
-                        cursor: pointer;
-                        text-decoration: none;
-                        display: inline-block;
-                        transition: all 0.2s;
-                    }
-                    .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
-                    .btn-start { background: #10b981; color: white; }
-                    .btn-stop { background: #ef4444; color: white; }
-                    .btn-reset { background: #f59e0b; color: white; }
-                    .btn-refresh { background: #6b7280; color: white; }
-                    
-                    .section { 
-                        background: #1e293b; 
-                        border-radius: 12px; 
-                        padding: 24px;
-                        margin-bottom: 24px;
-                        border: 1px solid #334155;
-                    }
-                    .section h2 { 
-                        font-size: 1.25rem; 
-                        margin-bottom: 20px;
-                        color: #f1f5f9;
-                    }
-                    
-                    .live-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-                        gap: 16px;
-                    }
-                    
-                    .student-card {
-                        background: #0f172a;
-                        border: 2px solid #334155;
-                        border-radius: 12px;
-                        padding: 16px;
-                        transition: all 0.3s;
-                    }
-                    .student-card:hover { border-color: #3b82f6; }
-                    .student-card.active { border-color: #10b981; box-shadow: 0 0 20px rgba(16, 185, 129, 0.3); }
-                    .student-card.submitted { border-color: #8b5cf6; }
-                    
-                    .student-header {
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: start;
-                        margin-bottom: 12px;
-                    }
-                    .student-name {
-                        font-weight: 700;
-                        font-size: 1.125rem;
-                        color: #f1f5f9;
-                    }
-                    .student-badge {
-                        padding: 4px 12px;
-                        border-radius: 12px;
-                        font-size: 0.75rem;
-                        font-weight: 600;
-                    }
-                    .badge-active { background: #10b981; color: #064e3b; }
-                    .badge-submitted { background: #8b5cf6; color: #4c1d95; }
-                    .badge-connected { background: #3b82f6; color: #1e3a8a; }
-                    
-                    .student-info {
-                        color: #94a3b8;
-                        font-size: 0.875rem;
-                        line-height: 1.6;
-                    }
-                    
-                    .pulse-dot {
-                        display: inline-block;
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 50%;
-                        background: #10b981;
-                        margin-right: 6px;
-                        animation: pulse-dot 2s infinite;
-                    }
-                    
-                    @keyframes pulse-dot {
-                        0%, 100% { opacity: 1; transform: scale(1); }
-                        50% { opacity: 0.5; transform: scale(1.2); }
-                    }
-                    
-                    table { 
-                        width: 100%; 
-                        border-collapse: collapse;
-                    }
-                    th, td { 
-                        padding: 12px; 
-                        text-align: left; 
-                        border-bottom: 1px solid #334155;
-                    }
-                    th { 
-                        background: #0f172a; 
-                        color: #94a3b8;
-                        font-weight: 600;
-                        font-size: 0.875rem;
-                        text-transform: uppercase;
-                    }
-                    tr:hover { background: #0f172a; }
-                    
-                    .connection-status {
-                        position: fixed;
-                        top: 20px;
-                        right: 20px;
-                        padding: 8px 16px;
-                        border-radius: 20px;
-                        font-size: 0.75rem;
-                        font-weight: 600;
-                        background: #1e293b;
-                        border: 1px solid #334155;
-                    }
-                    .connection-status.connected { border-color: #10b981; color: #10b981; }
-                    .connection-status.disconnected { border-color: #ef4444; color: #ef4444; }
-                </style>
-            </head>
-            <body>
-                <div id="connection-status" class="connection-status disconnected">● Connexion...</div>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Admin Mobile</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 16px;
+            padding-bottom: 80px;
+        }
+        
+        .header {
+            position: sticky;
+            top: 0;
+            background: #0f172a;
+            padding-bottom: 16px;
+            z-index: 100;
+        }
+        
+        h1 { 
+            font-size: 1.5rem; 
+            margin-bottom: 16px;
+            background: linear-gradient(to right, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .timer-card {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 2px solid #334155;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        
+        .timer-display {
+            font-size: 3rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            background: linear-gradient(to right, #10b981, #3b82f6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 16px 0;
+        }
+        
+        .timer-label {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #1e293b;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 16px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(to right, #10b981, #3b82f6);
+            transition: width 1s linear;
+            border-radius: 4px;
+        }
+        
+        .config-section {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        
+        .input-group {
+            margin-bottom: 16px;
+        }
+        
+        .input-group label {
+            display: block;
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            background: #0f172a;
+            border: 2px solid #334155;
+            border-radius: 8px;
+            color: #e2e8f0;
+            font-size: 1rem;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        
+        .btn {
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .btn:active {
+            transform: scale(0.95);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            grid-column: 1 / -1;
+        }
+        
+        .btn-secondary {
+            background: #334155;
+            color: #e2e8f0;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .stat-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid #334155;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #10b981, #3b82f6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            margin-top: 4px;
+        }
+        
+        .student-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .student-card {
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        
+        .student-card.active {
+            border-color: #10b981;
+            background: linear-gradient(135deg, #1e293b 0%, #064e3b 100%);
+        }
+        
+        .student-card.submitted {
+            border-color: #8b5cf6;
+        }
+        
+        .student-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .student-name {
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+        
+        .badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .badge-active { background: #10b981; color: #064e3b; }
+        .badge-submitted { background: #8b5cf6; color: #4c1d95; }
+        .badge-connected { background: #3b82f6; color: #1e3a8a; }
+        
+        .student-info {
+            color: #94a3b8;
+            font-size: 0.875rem;
+            line-height: 1.6;
+        }
+        
+        .section-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #f1f5f9;
+        }
+        
+        .connection-dot {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+        }
+        
+        .connection-dot.connected {
+            background: #10b981;
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 32px;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-dot" id="connection-dot"></div>
+    
+    <div class="header">
+        <h1>🎓 Dashboard Admin</h1>
+    </div>
+    
+    <div class="timer-card">
+        <div class="timer-label">Temps Restant</div>
+        <div class="timer-display" id="timer-display">--:--</div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        </div>
+    </div>
+    
+    <div class="config-section">
+        <div class="input-group">
+            <label>⏱️ Durée de l'examen (minutes)</label>
+            <input type="number" id="duration-input" value="${state.duration_minutes}" min="1" max="300">
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-primary" onclick="startExam()">
+                ▶️ Démarrer l'examen
+            </button>
+            <button class="btn btn-secondary" onclick="resetExam()">
+                🔄 Réinitialiser
+            </button>
+        </div>
+    </div>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" id="active-count">0</div>
+            <div class="stat-label">🟢 En ligne</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="submitted-count">0</div>
+            <div class="stat-label">✅ Terminé</div>
+        </div>
+    </div>
+    
+    <div class="section-title">👥 Étudiants en direct</div>
+    <div class="student-list" id="student-list">
+        <div class="empty-state">Aucun étudiant connecté</div>
+    </div>
+
+    <script>
+        const wsUrl = '${wsUrl}';
+        let ws;
+        let timeRemaining = 0;
+        let duration = 0;
+
+        function connect() {
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('✅ Connecté');
+                document.getElementById('connection-dot').classList.add('connected');
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
                 
-                <div class="container">
-                    <h1>🎓 Panneau d'Administration</h1>
-                    
-                    <div class="exam-status ${state.status}">
-                        ${state.status === 'running' ? '🟢' : state.status === 'finished' ? '🔴' : '🟡'} 
-                        ${state.status.toUpperCase()}
-                        ${state.start_time ? ` - Démarré: ${new Date(state.start_time).toLocaleString('fr-FR')}` : ''}
-                    </div>
+                if (data.type === 'time_update') {
+                    timeRemaining = data.timeRemaining;
+                    duration = data.duration;
+                    updateTimer();
+                } else if (data.students) {
+                    updateStudents(data.students);
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('🔌 Déconnecté');
+                document.getElementById('connection-dot').classList.remove('connected');
+                setTimeout(connect, 3000);
+            };
+        }
 
-                    <div class="controls">
-                        <a href="/admin/start" class="btn btn-start">▶️ Démarrer</a>
-                        <a href="/admin/stop" class="btn btn-stop">⏹️ Arrêter</a>
-                        <a href="/admin/reset" class="btn btn-reset">🔄 Réinitialiser</a>
-                        <a href="/admin" class="btn btn-refresh">🔃 Actualiser</a>
-                    </div>
+        function updateTimer() {
+            const minutes = Math.floor(timeRemaining / 60000);
+            const seconds = Math.floor((timeRemaining % 60000) / 1000);
+            const display = \`\${minutes.toString().padStart(2, '0')}:\${seconds.toString().padStart(2, '0')}\`;
+            
+            document.getElementById('timer-display').textContent = display;
+            
+            const progress = duration > 0 ? ((duration - timeRemaining) / duration) * 100 : 0;
+            document.getElementById('progress-fill').style.width = progress + '%';
+        }
 
-                    <div class="status-bar">
-                        <div class="status-card">
-                            <h3>🟢 En ligne</h3>
-                            <div class="value" id="active-count">0</div>
+        function updateStudents(students) {
+            const active = students.filter(s => s.status === 'active').length;
+            const submitted = students.filter(s => s.status === 'submitted').length;
+            
+            document.getElementById('active-count').textContent = active;
+            document.getElementById('submitted-count').textContent = submitted;
+            
+            const list = document.getElementById('student-list');
+            
+            if (!students || students.length === 0) {
+                list.innerHTML = '<div class="empty-state">Aucun étudiant connecté</div>';
+                return;
+            }
+            
+            list.innerHTML = students.map(s => {
+                const elapsed = Math.floor((Date.now() - s.lastActivity) / 1000);
+                const timeAgo = elapsed < 60 ? \`\${elapsed}s\` : \`\${Math.floor(elapsed/60)}min\`;
+                
+                let badgeClass = 'badge-connected';
+                let badgeText = 'Connecté';
+                let cardClass = '';
+                
+                if (s.status === 'active') {
+                    badgeClass = 'badge-active';
+                    badgeText = 'En cours';
+                    cardClass = 'active';
+                } else if (s.status === 'submitted') {
+                    badgeClass = 'badge-submitted';
+                    badgeText = 'Terminé';
+                    cardClass = 'submitted';
+                }
+                
+                return \`
+                    <div class="student-card \${cardClass}">
+                        <div class="student-header">
+                            <div class="student-name">\${s.name}</div>
+                            <span class="badge \${badgeClass}">\${badgeText}</span>
                         </div>
-                        <div class="status-card">
-                            <h3>📝 En cours</h3>
-                            <div class="value" id="composing-count">0</div>
-                        </div>
-                        <div class="status-card">
-                            <h3>✅ Terminé</h3>
-                            <div class="value" id="submitted-count">0</div>
-                        </div>
-                        <div class="status-card">
-                            <h3>👥 Total inscrits</h3>
-                            <div class="value">${students.length}</div>
-                        </div>
-                    </div>
-
-                    <div class="section">
-                        <h2>🔴 Étudiants en direct</h2>
-                        <div id="live-students" class="live-grid">
-                            <p style="color: #64748b;">Aucun étudiant connecté pour le moment...</p>
-                        </div>
-                    </div>
-
-                    <div class="section">
-                        <h2>📊 Tous les étudiants</h2>
-                        <div style="overflow-x: auto;">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Nom</th>
-                                        <th>Téléphone</th>
-                                        <th>Inscrit le</th>
-                                        <th>Résultats</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${students.map(s => `
-                                        <tr>
-                                            <td>${s.id}</td>
-                                            <td>${s.name}</td>
-                                            <td>${s.phone}</td>
-                                            <td>${new Date(s.created_at).toLocaleString('fr-FR')}</td>
-                                            <td>
-                                                ${s.results && s.results[0] ? 
-                                                    s.results.map(r => 
-                                                        `<span style="background: #334155; padding: 4px 8px; border-radius: 6px; font-size: 0.875rem; margin-right: 4px;">${r.exam_id}: ${r.score}/${r.total}</span>`
-                                                    ).join('') 
-                                                    : '<span style="color: #64748b;">Aucun</span>'}
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
+                        <div class="student-info">
+                            📱 \${s.phone}<br>
+                            ⏰ Actif il y a \${timeAgo}
+                            \${s.currentExam ? \`<br>📝 \${s.currentExam}\` : ''}
+                            \${s.score ? \`<br>🎯 \${s.score}\` : ''}
                         </div>
                     </div>
-                </div>
+                \`;
+            }).join('');
+        }
 
-                <script>
-                    const wsUrl = '${wsUrl}';
-                    let ws;
-                    const connectionStatus = document.getElementById('connection-status');
-                    const liveStudents = document.getElementById('live-students');
-                    const activeCount = document.getElementById('active-count');
-                    const composingCount = document.getElementById('composing-count');
-                    const submittedCount = document.getElementById('submitted-count');
+        async function startExam() {
+            const durationMinutes = parseInt(document.getElementById('duration-input').value);
+            
+            if (!durationMinutes || durationMinutes < 1) {
+                alert('Veuillez entrer une durée valide');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/admin/configure', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ durationMinutes })
+                });
+                
+                if (res.ok) {
+                    alert('✅ Examen démarré pour ' + durationMinutes + ' minutes');
+                }
+            } catch (error) {
+                alert('❌ Erreur: ' + error.message);
+            }
+        }
 
-                    function connect() {
-                        ws = new WebSocket(wsUrl);
-                        
-                        ws.onopen = () => {
-                            console.log('✅ WebSocket connecté');
-                            connectionStatus.textContent = '● Connecté';
-                            connectionStatus.className = 'connection-status connected';
-                        };
-                        
-                        ws.onmessage = (event) => {
-                            const data = JSON.parse(event.data);
-                            updateLiveView(data.students);
-                        };
-                        
-                        ws.onerror = (error) => {
-                            console.error('❌ Erreur WebSocket:', error);
-                        };
-                        
-                        ws.onclose = () => {
-                            console.log('🔌 WebSocket déconnecté, reconnexion...');
-                            connectionStatus.textContent = '● Déconnecté';
-                            connectionStatus.className = 'connection-status disconnected';
-                            setTimeout(connect, 3000);
-                        };
-                    }
+        async function resetExam() {
+            if (!confirm('Réinitialiser l\'examen ?')) return;
+            
+            try {
+                const res = await fetch('/admin/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (res.ok) {
+                    alert('✅ Examen réinitialisé');
+                    location.reload();
+                }
+            } catch (error) {
+                alert('❌ Erreur: ' + error.message);
+            }
+        }
 
-                    function updateLiveView(students) {
-                        if (!students || students.length === 0) {
-                            liveStudents.innerHTML = '<p style="color: #64748b;">Aucun étudiant connecté pour le moment...</p>';
-                            activeCount.textContent = '0';
-                            composingCount.textContent = '0';
-                            submittedCount.textContent = '0';
-                            return;
-                        }
-
-                        const active = students.filter(s => s.status === 'active').length;
-                        const submitted = students.filter(s => s.status === 'submitted').length;
-                        const connected = students.filter(s => s.status === 'connected').length;
-
-                        activeCount.textContent = active;
-                        composingCount.textContent = active;
-                        submittedCount.textContent = submitted;
-
-                        liveStudents.innerHTML = students.map(s => {
-                            const elapsed = Math.floor((Date.now() - s.lastActivity) / 1000);
-                            const timeAgo = elapsed < 60 ? \`\${elapsed}s\` : \`\${Math.floor(elapsed/60)}min\`;
-                            
-                            let badgeClass = 'badge-connected';
-                            let badgeText = 'Connecté';
-                            let cardClass = '';
-                            
-                            if (s.status === 'active') {
-                                badgeClass = 'badge-active';
-                                badgeText = 'En cours';
-                                cardClass = 'active';
-                            } else if (s.status === 'submitted') {
-                                badgeClass = 'badge-submitted';
-                                badgeText = 'Terminé';
-                                cardClass = 'submitted';
-                            }
-                            
-                            return \`
-                                <div class="student-card \${cardClass}">
-                                    <div class="student-header">
-                                        <div class="student-name">
-                                            \${s.status === 'active' ? '<span class="pulse-dot"></span>' : ''}
-                                            \${s.name}
-                                        </div>
-                                        <span class="student-badge \${badgeClass}">\${badgeText}</span>
-                                    </div>
-                                    <div class="student-info">
-                                        📱 \${s.phone}<br>
-                                        ⏰ Actif il y a \${timeAgo}
-                                        \${s.currentExam ? \`<br>📝 Examen: \${s.currentExam}\` : ''}
-                                        \${s.score ? \`<br>🎯 Score: \${s.score}\` : ''}
-                                    </div>
-                                </div>
-                            \`;
-                        }).join('');
-                    }
-
-                    connect();
-                </script>
-            </body>
-            </html>
+        connect();
+    </script>
+</body>
+</html>
         `);
     } catch (error) {
         console.error('Erreur /admin:', error);
@@ -729,41 +804,26 @@ app.get('/admin', async (req, res) => {
     }
 });
 
-// Route de santé
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime() });
+    res.json({ status: 'ok' });
 });
 
-// Route racine
 app.get('/', (req, res) => {
     res.json({ 
-        message: 'Serveur d\'examen actif',
+        message: 'Serveur actif',
         endpoints: {
-            status: '/api/status',
-            login: '/api/login',
-            submit: '/api/submit',
             admin: '/admin',
-            health: '/health'
+            status: '/api/status'
         }
     });
 });
 
-// Gestion d'erreurs globale
-app.use((err, req, res, next) => {
-    console.error('Erreur globale:', err.stack);
-    res.status(500).json({ error: 'Erreur serveur' });
-});
-
-// Démarrage
 server.listen(PORT, () => {
-    console.log(`🚀 Serveur prêt sur le port ${PORT}`);
+    console.log(`🚀 Serveur sur le port ${PORT}`);
     console.log(`👨‍🏫 Admin: http://localhost:${PORT}/admin`);
-    console.log(`📡 WebSocket activé pour le monitoring temps réel`);
 });
 
-// Gestion propre de l'arrêt
 process.on('SIGTERM', async () => {
-    console.log('SIGTERM reçu, fermeture...');
     await pool.end();
     process.exit(0);
 });
