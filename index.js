@@ -38,11 +38,22 @@ async function initDatabase() {
                 WHERE table_name = 'exam_state'
             );
         `);
-        
+
         const tableExists = tableCheck.rows[0].exists;
-        
+
         if (tableExists) {
             // Vérifier si la colonne duration_minutes existe
+            try {
+                await pool.query(`
+                ALTER TABLE results 
+                ALTER COLUMN score TYPE FLOAT,
+                ALTER COLUMN total TYPE FLOAT;
+            `);
+                console.log('✅ Colonnes score/total converties en FLOAT');
+            } catch (e) {
+                // Ignorer l'erreur si c'est déjà fait ou si la table est vide
+            }
+            
             const columnCheck = await pool.query(`
                 SELECT EXISTS (
                     SELECT FROM information_schema.columns 
@@ -50,12 +61,12 @@ async function initDatabase() {
                     AND column_name = 'duration_minutes'
                 );
             `);
-            
+
             const columnExists = columnCheck.rows[0].exists;
-            
+
             if (!columnExists) {
                 console.log('🔄 Migration: Ajout de la colonne duration_minutes...');
-                
+
                 // Supprimer les anciennes colonnes si elles existent
                 await pool.query(`
                     ALTER TABLE exam_state 
@@ -63,13 +74,13 @@ async function initDatabase() {
                     DROP COLUMN IF EXISTS duration_b1,
                     DROP COLUMN IF EXISTS duration_b2
                 `);
-                
+
                 // Ajouter la nouvelle colonne
                 await pool.query(`
                     ALTER TABLE exam_state 
                     ADD COLUMN duration_minutes INTEGER DEFAULT 60
                 `);
-                
+
                 console.log('✅ Migration réussie!');
             }
         } else {
@@ -132,12 +143,12 @@ const activeStudents = new Map();
 function broadcastUpdate() {
     const students = Array.from(activeStudents.values());
     console.log(`📡 Broadcasting ${students.length} étudiants actifs`);
-    
+
     const data = JSON.stringify({
         type: 'update',
         students: students
     });
-    
+
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(data);
@@ -152,20 +163,20 @@ async function broadcastTimeRemaining() {
             'SELECT start_time, duration_minutes FROM exam_state WHERE id = 1'
         );
         const state = result.rows[0];
-        
+
         if (state.start_time) {
             const startTime = new Date(state.start_time).getTime();
             const durationMs = state.duration_minutes * 60 * 1000;
             const elapsed = Date.now() - startTime;
             const remaining = Math.max(0, durationMs - elapsed);
-            
+
             const data = JSON.stringify({
                 type: 'time_update',
                 timeRemaining: remaining,
                 duration: durationMs,
                 isRunning: remaining > 0
             });
-            
+
             wss.clients.forEach(client => {
                 if (client.readyState === WebSocket.OPEN) {
                     client.send(data);
@@ -181,16 +192,16 @@ setInterval(broadcastTimeRemaining, 1000);
 
 wss.on('connection', (ws) => {
     console.log('👀 Client connecté');
-    
+
     // Envoyer l'état initial immédiatement
     ws.send(JSON.stringify({
         type: 'initial',
         students: Array.from(activeStudents.values())
     }));
-    
+
     // Envoyer le temps restant initial
     broadcastTimeRemaining();
-    
+
     ws.on('close', () => {
         console.log('👋 Client déconnecté');
     });
@@ -217,19 +228,19 @@ app.get('/api/status', async (req, res) => {
         const result = await pool.query(
             'SELECT start_time, duration_minutes FROM exam_state WHERE id = 1'
         );
-        
+
         const state = result.rows[0];
         let timeRemaining = null;
         let isRunning = false;
         let status = 'waiting';
-        
+
         if (state.start_time) {
             const startTime = new Date(state.start_time).getTime();
             const durationMs = state.duration_minutes * 60 * 1000;
             const elapsed = Date.now() - startTime;
             timeRemaining = Math.max(0, durationMs - elapsed);
             isRunning = timeRemaining > 0;
-            
+
             if (isRunning) {
                 status = 'running';
             } else {
@@ -253,7 +264,7 @@ app.get('/api/status', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { name, phone } = req.body;
-        
+
         if (!name || !phone) {
             return res.status(400).json({ error: 'Nom et téléphone requis' });
         }
@@ -277,14 +288,14 @@ app.post('/api/login', async (req, res) => {
             currentExam: null,
             status: 'connected'
         });
-        
+
         console.log(`✅ Étudiant connecté: ${name} (${phone})`);
         console.log(`📊 Total étudiants actifs: ${activeStudents.size}`);
-        
+
         broadcastUpdate();
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             student: {
                 id: student.id,
                 name: student.name,
@@ -300,48 +311,61 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/submit', async (req, res) => {
     try {
         const { phone, exam_id, score, total, answers, student_name } = req.body;
-        
+
+        // 1. Validation des données
         if (!phone || !exam_id) {
-            return res.status(400).json({ error: 'Données manquantes' });
+            return res.status(400).json({ error: 'Données manquantes (phone ou exam_id)' });
         }
 
-        let studentResult = await pool.query(
-            'SELECT id FROM students WHERE phone = $1',
-            [phone]
+        console.log(`📝 Réception soumission pour ${phone} - Score: ${score}/${total}`);
+
+        // 2. Gestion robuste de l'étudiant (Récupération ou Création sécurisée)
+        // On utilise ON CONFLICT pour éviter les erreurs si le téléphone existe déjà
+        let resultStudent = await pool.query(
+            `INSERT INTO students (name, phone) 
+             VALUES ($1, $2)
+             ON CONFLICT (phone) DO UPDATE SET name = COALESCE(EXCLUDED.name, students.name)
+             RETURNING id`,
+            [student_name || 'Anonyme', phone]
         );
 
-        let studentId;
-        if (studentResult.rows.length === 0) {
-            const insertResult = await pool.query(
-                'INSERT INTO students (name, phone) VALUES ($1, $2) RETURNING id',
-                [student_name || 'Anonyme', phone]
-            );
-            studentId = insertResult.rows[0].id;
-        } else {
-            studentId = studentResult.rows[0].id;
-        }
+        const studentId = resultStudent.rows[0].id;
+
+        // 3. Insertion des résultats
+        // On s'assure que score et total sont des nombres
+        // Si vous voulez supporter les décimales, assurez-vous que la colonne DB est de type FLOAT/REAL
+        // Sinon, on arrondit pour éviter le crash sur une colonne INTEGER
+        const finalScore = Number(score);
+        const finalTotal = Number(total);
 
         await pool.query(
             `INSERT INTO results (student_id, exam_id, score, total, answers)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (student_id, exam_id)
              DO UPDATE SET score = $3, total = $4, answers = $5, submitted_at = NOW()`,
-            [studentId, exam_id, score, total, JSON.stringify(answers)]
+            [studentId, exam_id, finalScore, finalTotal, JSON.stringify(answers)]
         );
 
+        // 4. Mise à jour du Dashboard Admin
         if (activeStudents.has(phone)) {
             const student = activeStudents.get(phone);
             student.status = 'submitted';
             student.currentExam = exam_id;
-            student.score = `${score}/${total}`;
+            student.score = `${finalScore}/${finalTotal}`;
             student.lastActivity = Date.now();
             broadcastUpdate();
         }
 
         res.json({ success: true });
+
     } catch (error) {
-        console.error('Erreur /api/submit:', error);
-        res.status(500).json({ error: 'Erreur serveur' });
+        // Log détaillé de l'erreur pour le débogage
+        console.error('❌ Erreur critique /api/submit:', error);
+        console.error('Données reçues:', req.body);
+        res.status(500).json({
+            error: 'Erreur serveur lors de l\'enregistrement',
+            details: error.message
+        });
     }
 });
 
@@ -364,7 +388,7 @@ app.post('/api/heartbeat', (req, res) => {
 app.post('/admin/configure', async (req, res) => {
     try {
         const { durationMinutes } = req.body;
-        
+
         if (!durationMinutes || durationMinutes < 1) {
             return res.status(400).json({ error: 'Durée invalide' });
         }
@@ -373,7 +397,7 @@ app.post('/admin/configure', async (req, res) => {
             'UPDATE exam_state SET duration_minutes = $1, start_time = NOW() WHERE id = 1',
             [durationMinutes]
         );
-        
+
         console.log(`⚙️ Examen configuré: ${durationMinutes} minutes`);
         res.json({ success: true });
     } catch (error) {
@@ -877,7 +901,7 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-    res.json({ 
+    res.json({
         message: 'Serveur actif',
         endpoints: {
             admin: '/admin',
