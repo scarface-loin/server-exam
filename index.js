@@ -1,11 +1,10 @@
 // ========================================
-// FICHIER index.js COMPLET (Serveur Node.js)
+// FICHIER index.js AVEC POSTGRESQL
 // ========================================
 
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,171 +13,366 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Chemin vers le fichier de données
-const DATA_FILE = path.join(__dirname, 'students.json');
-const CONFIG_FILE = path.join(__dirname, 'config.json');
+// Configuration PostgreSQL
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
-// --- GESTION DE L'ÉTAT DE L'EXAMEN ---
-let examState = {
-    status: 'waiting',
-    startTime: null,
-    config: {
-        durationB1: 60 * 60 * 1000,
-        durationB2: 75 * 60 * 1000,
+// --- INITIALISATION DE LA BASE DE DONNÉES ---
+async function initDatabase() {
+    try {
+        // Table pour l'état de l'examen
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS exam_state (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                status VARCHAR(20) DEFAULT 'waiting',
+                start_time TIMESTAMP,
+                duration_b1 INTEGER DEFAULT 3600000,
+                duration_b2 INTEGER DEFAULT 4500000,
+                CHECK (id = 1)
+            )
+        `);
+
+        // Table pour les étudiants
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS students (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                phone VARCHAR(20) UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `);
+
+        // Table pour les résultats
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS results (
+                id SERIAL PRIMARY KEY,
+                student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+                exam_id VARCHAR(50) NOT NULL,
+                score INTEGER NOT NULL,
+                total INTEGER NOT NULL,
+                answers JSONB,
+                submitted_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(student_id, exam_id)
+            )
+        `);
+
+        // Insérer l'état initial si nécessaire
+        await pool.query(`
+            INSERT INTO exam_state (id, status, start_time, duration_b1, duration_b2)
+            VALUES (1, 'waiting', NULL, 3600000, 4500000)
+            ON CONFLICT (id) DO NOTHING
+        `);
+
+        console.log('✅ Base de données initialisée avec succès');
+    } catch (error) {
+        console.error('❌ Erreur d\'initialisation de la base de données:', error);
+        process.exit(1);
     }
-};
-
-function loadConfig() {
-    if (fs.existsSync(CONFIG_FILE)) {
-        try {
-            const data = fs.readFileSync(CONFIG_FILE, 'utf8');
-            examState = JSON.parse(data);
-            console.log('✅ Configuration de l\'examen chargée.');
-        } catch (e) {
-            console.error("❌ Erreur de parsing de config.json, utilisation des valeurs par défaut.", e);
-            saveConfig();
-        }
-    } else {
-        console.log('ℹ️ Aucune configuration trouvée, création du fichier par défaut.');
-        saveConfig();
-    }
 }
 
-function saveConfig() {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(examState, null, 2));
-}
-
-loadConfig();
-
-// --- FONCTIONS UTILITAIRES ---
-function getStudents() {
-    if (!fs.existsSync(DATA_FILE)) {
-        fs.writeFileSync(DATA_FILE, JSON.stringify({}));
-        return {};
-    }
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data);
-}
-
-function saveStudents(data) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-}
+initDatabase();
 
 // ========================================
 // ROUTES API PUBLIQUES
 // ========================================
 
-// --- ROUTE /api/status (celle qui posait problème) ---
-app.get('/api/status', (req, res) => {
-    let timeRemaining = 0;
-    if (examState.status === 'running' && examState.startTime) {
-        // La durée est maintenant calculée côté client, on envoie juste le temps de départ
-        // C'est plus robuste si B1 et B2 ont des durées différentes.
-        const elapsed = Date.now() - new Date(examState.startTime).getTime();
-        // On vérifie avec la plus longue durée possible pour savoir si c'est fini
-        const maxDuration = Math.max(examState.config.durationB1, examState.config.durationB2);
-        if (elapsed > maxDuration) {
-            examState.status = 'finished';
-            saveConfig();
+app.get('/api/status', async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT status, start_time, duration_b1, duration_b2 FROM exam_state WHERE id = 1'
+        );
+        
+        const state = result.rows[0];
+        
+        // Vérifier si l'examen est terminé
+        if (state.status === 'running' && state.start_time) {
+            const elapsed = Date.now() - new Date(state.start_time).getTime();
+            const maxDuration = Math.max(state.duration_b1, state.duration_b2);
+            
+            if (elapsed > maxDuration) {
+                await pool.query(
+                    "UPDATE exam_state SET status = 'finished' WHERE id = 1"
+                );
+                state.status = 'finished';
+            }
         }
-    }
 
-    res.json({
-        status: examState.status,
-        startTime: examState.startTime,
-        config: examState.config
-    });
-});
-
-app.post('/api/login', (req, res) => {
-    const { name, phone } = req.body;
-    if (!name || !phone) return res.status(400).json({ error: 'Nom et téléphone requis' });
-    
-    const students = getStudents();
-    let student = Object.values(students).find(s => s.phone === phone);
-
-    if (!student) {
-        const newId = `student_${Date.now()}`;
-        student = { id: newId, name, phone, results: {} };
-        students[newId] = student;
-    } else {
-        student.name = name; // Mettre à jour le nom
-    }
-    
-    saveStudents(students);
-    res.json({ success: true, student });
-});
-
-app.post('/api/submit', (req, res) => {
-    const { phone, exam_id, score, total, answers } = req.body;
-    if (!phone || !exam_id) return res.status(400).json({ error: 'Téléphone et ID examen requis' });
-
-    const students = getStudents();
-    const studentKey = Object.keys(students).find(k => students[k].phone === phone);
-
-    if (studentKey) {
-        if (!students[studentKey].results) students[studentKey].results = {};
-        students[studentKey].results[exam_id] = { score, total, answers, submittedAt: new Date().toISOString() };
-        saveStudents(students);
-        res.json({ success: true, message: `Résultats pour ${exam_id} enregistrés.` });
-    } else {
-        res.status(404).json({ error: 'Étudiant non trouvé.' });
+        res.json({
+            status: state.status,
+            startTime: state.start_time,
+            config: {
+                durationB1: state.duration_b1,
+                durationB2: state.duration_b2
+            }
+        });
+    } catch (error) {
+        console.error('Erreur /api/status:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
+app.post('/api/login', async (req, res) => {
+    try {
+        const { name, phone } = req.body;
+        
+        if (!name || !phone) {
+            return res.status(400).json({ error: 'Nom et téléphone requis' });
+        }
+
+        // Chercher ou créer l'étudiant
+        const result = await pool.query(
+            `INSERT INTO students (name, phone) 
+             VALUES ($1, $2) 
+             ON CONFLICT (phone) 
+             DO UPDATE SET name = $1 
+             RETURNING *`,
+            [name, phone]
+        );
+
+        const student = result.rows[0];
+
+        res.json({ 
+            success: true, 
+            student: {
+                id: student.id,
+                name: student.name,
+                phone: student.phone
+            }
+        });
+    } catch (error) {
+        console.error('Erreur /api/login:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.post('/api/submit', async (req, res) => {
+    try {
+        const { phone, exam_id, score, total, answers } = req.body;
+        
+        if (!phone || !exam_id) {
+            return res.status(400).json({ error: 'Téléphone et ID examen requis' });
+        }
+
+        // Trouver l'étudiant
+        const studentResult = await pool.query(
+            'SELECT id FROM students WHERE phone = $1',
+            [phone]
+        );
+
+        if (studentResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Étudiant non trouvé' });
+        }
+
+        const studentId = studentResult.rows[0].id;
+
+        // Enregistrer le résultat
+        await pool.query(
+            `INSERT INTO results (student_id, exam_id, score, total, answers)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (student_id, exam_id)
+             DO UPDATE SET score = $3, total = $4, answers = $5, submitted_at = NOW()`,
+            [studentId, exam_id, score, total, JSON.stringify(answers)]
+        );
+
+        res.json({ 
+            success: true, 
+            message: `Résultats pour ${exam_id} enregistrés.` 
+        });
+    } catch (error) {
+        console.error('Erreur /api/submit:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
 
 // ========================================
 // ROUTES ADMIN
 // ========================================
-app.get('/admin/start', (req, res) => {
-    if (examState.status !== 'running') {
-        examState.status = 'running';
-        examState.startTime = new Date().toISOString();
-        saveConfig();
+
+app.get('/admin/start', async (req, res) => {
+    try {
+        await pool.query(
+            "UPDATE exam_state SET status = 'running', start_time = NOW() WHERE id = 1"
+        );
         console.log('🚀 EXAMEN DÉMARRÉ !');
+        res.redirect('/admin');
+    } catch (error) {
+        console.error('Erreur start:', error);
+        res.status(500).send('Erreur');
     }
-    res.redirect('/admin');
 });
 
-app.get('/admin/stop', (req, res) => {
-    examState.status = 'finished';
-    examState.startTime = null;
-    saveConfig();
-    console.log('🛑 EXAMEN TERMINÉ !');
-    res.redirect('/admin');
+app.get('/admin/stop', async (req, res) => {
+    try {
+        await pool.query(
+            "UPDATE exam_state SET status = 'finished', start_time = NULL WHERE id = 1"
+        );
+        console.log('🛑 EXAMEN TERMINÉ !');
+        res.redirect('/admin');
+    } catch (error) {
+        console.error('Erreur stop:', error);
+        res.status(500).send('Erreur');
+    }
 });
 
-app.get('/admin/reset', (req, res) => {
-    examState.status = 'waiting';
-    examState.startTime = null;
-    saveConfig();
-    console.log('🔄 EXAMEN RÉINITIALISÉ !');
-    res.redirect('/admin');
+app.get('/admin/reset', async (req, res) => {
+    try {
+        await pool.query(
+            "UPDATE exam_state SET status = 'waiting', start_time = NULL WHERE id = 1"
+        );
+        console.log('🔄 EXAMEN RÉINITIALISÉ !');
+        res.redirect('/admin');
+    } catch (error) {
+        console.error('Erreur reset:', error);
+        res.status(500).send('Erreur');
+    }
 });
 
-app.get('/admin', (req, res) => {
-    // ... (votre code HTML pour la page admin reste le même)
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head><title>Admin</title></head>
-        <body>
-            <h1>Panneau Admin</h1>
-            <p>Statut: <strong>${examState.status}</strong></p>
-            <a href="/admin/start">Démarrer</a> | 
-            <a href="/admin/stop">Arrêter</a> | 
-            <a href="/admin/reset">Réinitialiser</a>
-            <h2>Élèves</h2>
-            <pre>${JSON.stringify(getStudents(), null, 2)}</pre>
-        </body>
-        </html>
-    `);
+app.get('/admin', async (req, res) => {
+    try {
+        const stateResult = await pool.query('SELECT * FROM exam_state WHERE id = 1');
+        const studentsResult = await pool.query(`
+            SELECT s.*, 
+                   json_agg(
+                       json_build_object(
+                           'exam_id', r.exam_id,
+                           'score', r.score,
+                           'total', r.total,
+                           'submitted_at', r.submitted_at
+                       )
+                   ) FILTER (WHERE r.id IS NOT NULL) as results
+            FROM students s
+            LEFT JOIN results r ON s.id = r.student_id
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+        `);
+
+        const state = stateResult.rows[0];
+        const students = studentsResult.rows;
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="fr">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Admin - Gestion Examen</title>
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 1200px; margin: 20px auto; padding: 20px; }
+                    h1 { color: #333; }
+                    .status { padding: 10px; border-radius: 5px; display: inline-block; margin: 10px 0; }
+                    .status.waiting { background: #ffc107; }
+                    .status.running { background: #4caf50; color: white; }
+                    .status.finished { background: #f44336; color: white; }
+                    .controls { margin: 20px 0; }
+                    .controls a { 
+                        display: inline-block; 
+                        padding: 10px 20px; 
+                        margin-right: 10px; 
+                        background: #2196F3; 
+                        color: white; 
+                        text-decoration: none; 
+                        border-radius: 5px; 
+                    }
+                    .controls a:hover { background: #0b7dda; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+                    th { background-color: #2196F3; color: white; }
+                    tr:nth-child(even) { background-color: #f2f2f2; }
+                    pre { background: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; }
+                </style>
+            </head>
+            <body>
+                <h1>🎓 Panneau d'Administration</h1>
+                
+                <div class="status ${state.status}">
+                    Statut: <strong>${state.status.toUpperCase()}</strong>
+                    ${state.start_time ? `<br>Démarré: ${new Date(state.start_time).toLocaleString('fr-FR')}` : ''}
+                </div>
+
+                <div class="controls">
+                    <a href="/admin/start">▶️ Démarrer l'examen</a>
+                    <a href="/admin/stop">⏹️ Arrêter l'examen</a>
+                    <a href="/admin/reset">🔄 Réinitialiser</a>
+                    <a href="/admin" style="background: #9E9E9E;">🔃 Actualiser</a>
+                </div>
+
+                <h2>📊 Étudiants inscrits (${students.length})</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Nom</th>
+                            <th>Téléphone</th>
+                            <th>Inscrit le</th>
+                            <th>Résultats</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${students.map(s => `
+                            <tr>
+                                <td>${s.id}</td>
+                                <td>${s.name}</td>
+                                <td>${s.phone}</td>
+                                <td>${new Date(s.created_at).toLocaleString('fr-FR')}</td>
+                                <td>
+                                    ${s.results && s.results[0] ? 
+                                        s.results.map(r => 
+                                            `${r.exam_id}: ${r.score}/${r.total}`
+                                        ).join('<br>') 
+                                        : 'Aucun résultat'}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+
+                <h2>🔍 Données brutes</h2>
+                <pre>${JSON.stringify(students, null, 2)}</pre>
+            </body>
+            </html>
+        `);
+    } catch (error) {
+        console.error('Erreur /admin:', error);
+        res.status(500).send('Erreur serveur');
+    }
 });
 
-// ========================================
-// DÉMARRAGE
-// ========================================
+// Route de santé
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Route racine
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'Serveur d\'examen actif',
+        endpoints: {
+            status: '/api/status',
+            login: '/api/login',
+            submit: '/api/submit',
+            admin: '/admin',
+            health: '/health'
+        }
+    });
+});
+
+// Gestion d'erreurs globale
+app.use((err, req, res, next) => {
+    console.error('Erreur globale:', err.stack);
+    res.status(500).json({ error: 'Erreur serveur' });
+});
+
+// Démarrage
 app.listen(PORT, () => {
-    console.log(`🚀 Serveur prêt sur http://localhost:${PORT}`);
+    console.log(`🚀 Serveur prêt sur le port ${PORT}`);
     console.log(`👨‍🏫 Admin: http://localhost:${PORT}/admin`);
+});
+
+// Gestion propre de l'arrêt
+process.on('SIGTERM', async () => {
+    console.log('SIGTERM reçu, fermeture...');
+    await pool.end();
+    process.exit(0);
 });
