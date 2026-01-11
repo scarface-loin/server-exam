@@ -130,10 +130,14 @@ initDatabase();
 const activeStudents = new Map();
 
 function broadcastUpdate() {
+    const students = Array.from(activeStudents.values());
+    console.log(`📡 Broadcasting ${students.length} étudiants actifs`);
+    
     const data = JSON.stringify({
         type: 'update',
-        students: Array.from(activeStudents.values())
+        students: students
     });
+    
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(data);
@@ -178,11 +182,13 @@ setInterval(broadcastTimeRemaining, 1000);
 wss.on('connection', (ws) => {
     console.log('👀 Client connecté');
     
+    // Envoyer l'état initial immédiatement
     ws.send(JSON.stringify({
         type: 'initial',
         students: Array.from(activeStudents.values())
     }));
     
+    // Envoyer le temps restant initial
     broadcastTimeRemaining();
     
     ws.on('close', () => {
@@ -263,6 +269,7 @@ app.post('/api/login', async (req, res) => {
 
         const student = result.rows[0];
 
+        // Ajouter au tracking temps réel
         activeStudents.set(phone, {
             name,
             phone,
@@ -270,6 +277,10 @@ app.post('/api/login', async (req, res) => {
             currentExam: null,
             status: 'connected'
         });
+        
+        console.log(`✅ Étudiant connecté: ${name} (${phone})`);
+        console.log(`📊 Total étudiants actifs: ${activeStudents.size}`);
+        
         broadcastUpdate();
 
         res.json({ 
@@ -341,6 +352,7 @@ app.post('/api/heartbeat', (req, res) => {
         student.lastActivity = Date.now();
         student.currentExam = exam_id || student.currentExam;
         student.status = 'active';
+        broadcastUpdate(); // IMPORTANT : Broadcaster après chaque heartbeat
     }
     res.json({ success: true });
 });
