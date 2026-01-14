@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plateforme d'Évaluation en Ligne - B1</title>
+    <!-- Lien vers le CSS dans le dossier static -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='B1/styles.css') }}">
+    <!-- Bibliothèque Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    
+    <style>
+        /* Petit ajout pour afficher l'identité proprement */
+        .student-header {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #007bff;
+            padding: 10px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: sans-serif;
+        }
+        .connection-status { color: #28a745; font-weight: bold; font-size: 0.9em; }
+        .student-details { font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+
+    <!-- BARRE D'IDENTITÉ (Ajoutée dynamiquement par Flask) -->
+    <div class="student-header">
+        <div class="student-details">
+            👤 {{ nom }} | 🆔 {{ numero }} | 🎓 Option: {{ option }}
+        </div>
+        <div class="connection-status">● Connecté</div>
+    </div>
+
+    <!-- TON CONTENU ORIGINAL -->
+    <div class="container">
+        <header>
+            <h1>Plateforme d'Évaluation en Ligne</h1>
+            <p class="subtitle">Sprachausteine - Tests de Langue Allemande</p>
+        </header>
+
+        <div class="exam-selection">
+            <button class="exam-btn active" data-exam="0">Teil 1 - Grenzacker</button>
+            <button class="exam-btn" data-exam="1">Teil 2 - Sahara-Länder</button>
+        </div>
+
+        <div id="exam-container"></div>
+
+        <div class="action-buttons">
+            <button id="submit-btn" class="btn btn-primary">Soumettre les réponses</button>
+            <button id="reset-btn" class="btn btn-secondary">Recommencer</button>
+        </div>
+
+        <div id="results-container" class="results-container hidden"></div>
+    </div>
+
+    <!-- SCRIPTS -->
+    
+    <!-- 1. Script de "Pont" pour passer les infos Flask vers ton JS -->
+    <script>
+        // On crée une variable globale accessible par script.js
+        window.studentIdentity = {
+            nom: "{{ nom }}",
+            numero: "{{ numero }}",
+            option: "{{ option }}"
+        };
+
+        // Connexion Socket.IO pour dire au prof "Je suis là"
+        const socket = io('/etudiant');
+        socket.on('connect', () => {
+            socket.emit('student_login', window.studentIdentity);
+        });
+    </script>
+
+    <!-- 2. Tes scripts (chargés depuis static) -->
+    <script src="{{ url_for('static', filename='B1/data.js') }}"></script>
+    <script src="{{ url_for('static', filename='B1/script.js') }}"></script>
+</body>
+</html>

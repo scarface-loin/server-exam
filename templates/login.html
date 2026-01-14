@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Connexion à l'examen</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f2f5; }
+        .login-card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; }
+        input, select, button { width: 100%; padding: 10px; margin-bottom: 15px; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #0056b3; }
+        h2 { text-align: center; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h2>Identification</h2>
+        <form method="POST" action="/">
+            <label>Nom complet</label>
+            <input type="text" name="nom" required placeholder="Ex: Jean Dupont">
+            
+            <label>Numéro étudiant</label>
+            <input type="text" name="numero" required placeholder="Ex: 123456">
+            
+            <label>Votre Option</label>
+            <select name="option">
+                <option value="B1">Option B1 (Débutant)</option>
+                <option value="B2">Option B2 (Avancé)</option>
+            </select>
+            
+            <button type="submit">Commencer l'exercice</button>
+        </form>
+    </div>
+</body>
+</html>

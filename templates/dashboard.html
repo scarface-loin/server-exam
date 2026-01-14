@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Professeur - Temps Réel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: #2c3e50; color: #ecf0f1; }
+        
+        .grid-container { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+        
+        .card { background: #34495e; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { border-bottom: 2px solid #e67e22; padding-bottom: 10px; margin-top: 0; color: #f39c12; }
+        
+        /* Styles pour la liste des étudiants */
+        .count-badge { font-size: 2em; color: #2ecc71; font-weight: bold; }
+        #usersList { margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px; }
+        .user-tag { background: #27ae60; padding: 5px 12px; border-radius: 20px; font-size: 0.9em; animation: popIn 0.3s ease-out; }
+        
+        /* Styles pour le tableau */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #2c3e50; }
+        th, td { padding: 12px; border-bottom: 1px solid #7f8c8d; text-align: left; }
+        th { background: #2c3e50; color: #bdc3c7; text-transform: uppercase; font-size: 0.85em; }
+        
+        /* Couleurs des options */
+        .opt-b1 { color: #3498db; font-weight: bold; }
+        .opt-b2 { color: #e67e22; font-weight: bold; }
+
+        /* Animation nouvelle ligne */
+        .new-row { animation: flash 2s; background-color: rgba(46, 204, 113, 0.2); }
+        @keyframes flash { 0% { background-color: #27ae60; } 100% { background-color: transparent; } }
+        @keyframes popIn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center; margin-bottom: 30px;">Tableau de Bord - Examen</h1>
+
+    <div class="grid-container">
+        
+        <!-- COLONNE GAUCHE : Étudiants en ligne -->
+        <div class="card">
+            <h2>En ligne (<span id="studentCount" class="count-badge">0</span>)</h2>
+            <p style="color: #bdc3c7; font-size: 0.9em;">Étudiants actuellement sur la page :</p>
+            <div id="usersList">
+                <!-- Les noms apparaîtront ici -->
+            </div>
+        </div>
+
+        <!-- COLONNE DROITE : Résultats reçus -->
+        <div class="card">
+            <h2>Résultats reçus</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Heure</th>
+                        <th>Nom</th>
+                        <th>Numéro</th>
+                        <th>Option</th>
+                        <th>Score</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsBody">
+                    <!-- Les résultats apparaîtront ici -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Connexion au canal Admin
+        const socket = io('/admin');
+
+        socket.on('connect', () => {
+            console.log("Connecté au serveur en tant qu'Admin");
+        });
+
+        // 1. GESTION DES CONNECTÉS (Corrige l'affichage des noms)
+        socket.on('update_users', (data) => {
+            // Mettre à jour le chiffre
+            document.getElementById('studentCount').innerText = data.count;
+            
+            // Mettre à jour la liste des noms
+            const listContainer = document.getElementById('usersList');
+            listContainer.innerHTML = ''; // On vide la liste
+            
+            data.users.forEach(user => {
+                const tag = document.createElement('div');
+                tag.className = 'user-tag';
+                // Affiche "Jean (B1)"
+                tag.innerHTML = `👤 ${user.nom} <small style="opacity:0.8">(${user.option})</small>`;
+                listContainer.appendChild(tag);
+            });
+        });
+
+        // 2. GESTION DES RÉSULTATS (Corrige les noms de variables)
+        socket.on('new_result', (data) => {
+            const tbody = document.getElementById('resultsBody');
+            const row = tbody.insertRow(0); // Insère en haut
+            
+            row.className = 'new-row'; // Animation flash
+            
+            // Choix de la couleur selon l'option
+            const optionClass = data.option === 'B1' ? 'opt-b1' : 'opt-b2';
+
+            row.innerHTML = `
+                <td>${data.timestamp}</td>
+                <td style="font-weight:bold; font-size:1.1em">${data.nom}</td>
+                <td>${data.numero}</td>
+                <td class="${optionClass}">${data.option}</td>
+                <td style="font-weight:bold; font-size:1.2em">${data.score_global}</td>
+            `;
+        });
+    </script>
+</body>
+</html>

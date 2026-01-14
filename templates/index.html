@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Exercice - Soumission Temps Réel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        /* Styles basiques pour l'exemple */
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-identity { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #90caf9; }
+        .form-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="number"] { padding: 8px; width: 100%; box-sizing: border-box; }
+        .hidden { display: none; }
+        
+        /* Tes styles CSS originaux devraient aller ici */
+        .option-btn.selected { background-color: #007bff; color: white; }
+        .correct { color: green; } .incorrect { color: red; }
+    </style>
+</head>
+<body>
+
+    <!-- NOUVEAU : Formulaire d'identification -->
+    <div class="form-identity">
+        <h3>Vos informations</h3>
+        <div class="form-group">
+            <label>Nom complet :</label>
+            <input type="text" id="studentName" placeholder="Ex: Jean Dupont">
+        </div>
+        <div class="form-group">
+            <label>Numéro étudiant :</label>
+            <input type="text" id="studentNumber" placeholder="Ex: 123456">
+        </div>
+        <div class="form-group">
+            <label>Option :</label>
+            <select id="studentOption">
+                <option value="B1">Option B1</option>
+                <option value="B2">Option B2</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Conteneur de l'exercice (Ton code) -->
+    <div id="exerciseContainer">
+        <h2 id="progressText">0/0 questions répondues</h2>
+        
+        <!-- Simulation de structure pour l'exemple car ton JSON n'est pas fourni -->
+        <div id="questionsContainer0"></div>
+        
+        <button id="submitBtn" style="margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer;">Soumettre les réponses</button>
+    </div>
+
+    <div id="resultsContainer" class="hidden">
+        <h2 id="resultsTitle"></h2>
+        <p id="resultsMessage"></p>
+        <div id="scoreCircle">
+            <span id="scoreNumber"></span><span class="score-total"></span>
+        </div>
+        <div id="resultsDetails"></div>
+        <button id="reviewBtn">Revoir</button>
+        <button id="restartBtn">Recommencer</button>
+    </div>
+
+    <script>
+        // --- 1. CONNEXION SOCKET.IO (Pour dire "Je suis connecté") ---
+        const socket = io('/student_space'); // Connexion au namespace étudiant
+
+        // --- 2. DONNÉES SIMULÉES (Pour que l'exemple fonctionne sans ton JSON) ---
+        const exercicesData = {
+            exercices: [{
+                titre: "Exemple", instructions: "Remplir", texte: "Le ciel est (1).",
+                lacunes: [{numero: 1, contexte: "Couleur du ciel", numero: 1}],
+                options: {"A": "Vert", "B": "Bleu"}, solutions: {1: "B"}
+            }]
+        };
+
+        // --- 3. TON CODE JS MODIFIÉ ---
+        
+        // État de l'application
+        let userAnswers = {};
+        let isSubmitted = false;
+
+        // Éléments DOM
+        const exerciseContainer = document.getElementById('exerciseContainer');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const submitBtn = document.getElementById('submitBtn');
+        const progressText = document.getElementById('progressText');
+        const reviewBtn = document.getElementById('reviewBtn');
+        const restartBtn = document.getElementById('restartBtn');
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAllExercises();
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            submitBtn.addEventListener('click', submitAnswers);
+            reviewBtn.addEventListener('click', reviewExercises);
+            restartBtn.addEventListener('click', restartExercises);
+        }
+
+        // ... (Tes fonctions loadAllExercises, loadExercise, displayText, createQuestions, selectOption restent identiques) ...
+        // J'inclus les versions simplifiées pour que ça marche :
+        function loadAllExercises() {
+            exercicesData.exercices.forEach((ex, i) => createQuestions(ex, i));
+            updateProgress();
+        }
+        function createQuestions(exercise, index) {
+            const container = document.getElementById(`questionsContainer${index}`);
+            exercise.lacunes.forEach(l => {
+                const div = document.createElement('div');
+                div.innerHTML = `<p>${exercise.texte}</p>`;
+                Object.entries(exercise.options).forEach(([k, v]) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'option-btn';
+                    btn.textContent = `${k}) ${v}`;
+                    btn.onclick = () => {
+                        document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+                        btn.classList.add('selected');
+                        userAnswers[`${index}-${l.numero}`] = k;
+                        updateProgress();
+                    };
+                    div.appendChild(btn);
+                });
+                container.appendChild(div);
+            });
+        }
+        function updateProgress() {
+            progressText.textContent = `${Object.keys(userAnswers).length} questions répondues`;
+        }
+        // ... Fin des fonctions simplifiées ...
+
+        // --- LA FONCTION IMPORTANTE MODIFIÉE ---
+        function submitAnswers() {
+            if (isSubmitted) return;
+            
+            // Validation des champs d'identité
+            const name = document.getElementById('studentName').value;
+            const number = document.getElementById('studentNumber').value;
+            const option = document.getElementById('studentOption').value;
+
+            if(!name || !number) {
+                alert("Veuillez remplir votre Nom et Numéro étudiant avant de soumettre.");
+                return;
+            }
+
+            if (Object.keys(userAnswers).length === 0) {
+                alert('Veuillez répondre à au moins une question.');
+                return;
+            }
+
+            isSubmitted = true;
+            submitBtn.disabled = true;
+
+            // Calcul du score (Logique simplifiée basée sur ton code)
+            let correctCount = 0;
+            let totalAnswered = 0;
+            
+            exercicesData.exercices.forEach((exercise, exerciseIndex) => {
+                exercise.lacunes.forEach(lacune => {
+                    const key = `${exerciseIndex}-${lacune.numero}`;
+                    if(userAnswers[key]) {
+                        totalAnswered++;
+                        if(userAnswers[key] === exercise.solutions[lacune.numero]) correctCount++;
+                    }
+                });
+            });
+
+            // --- ENVOI AU SERVEUR (WEBHOOK) ---
+            const payload = {
+                nom: name,
+                numero: number,
+                option: option,
+                answers: userAnswers,
+                score: `${correctCount}/${totalAnswered}`
+            };
+
+            fetch('/webhook/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Succès:', data);
+                // Afficher les résultats visuels à l'étudiant
+                showResults(correctCount, totalAnswered);
+            })
+            .catch((error) => {
+                console.error('Erreur:', error);
+                alert("Erreur lors de l'envoi des résultats au serveur.");
+            });
+        }
+
+        function showResults(correctCount, totalAnswered) {
+            exerciseContainer.classList.add('hidden');
+            resultsContainer.classList.remove('hidden');
+            document.getElementById('resultsTitle').textContent = "Résultats envoyés !";
+            document.getElementById('scoreNumber').textContent = correctCount;
+            document.querySelector('.score-total').textContent = `/${totalAnswered}`;
+        }
+
+        function reviewExercises() {
+            resultsContainer.classList.add('hidden');
+            exerciseContainer.classList.remove('hidden');
+        }
+
+        function restartExercises() {
+            userAnswers = {};
+            isSubmitted = false;
+            submitBtn.disabled = false;
+            resultsContainer.classList.add('hidden');
+            exerciseContainer.classList.remove('hidden');
+            updateProgress();
+            // Réinitialiser les inputs UI ici si besoin
+        }
+    </script>
+</body>
+</html>

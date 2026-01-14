@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Évaluation TELC - Sprachbausteine (B2)</title>
+    <!-- Lien Flask vers le CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='B2/styles.css') }}">
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    
+    <style>
+        /* Style pour la barre d'info étudiant */
+        .student-header {
+            background-color: #f8f9fa;
+            border-bottom: 3px solid #e67e22; /* Orange pour B2 */
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: sans-serif;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .student-info strong { color: #333; font-size: 1.1em; }
+        .connection-status { color: #28a745; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <!-- BARRE D'IDENTITÉ (Ajoutée pour Flask) -->
+    <div class="student-header">
+        <div class="student-info">
+            👤 <strong>{{ nom }}</strong> | 🆔 {{ numero }} | 🎓 Option: <span style="color:#e67e22; font-weight:bold">{{ option }}</span>
+        </div>
+        <div class="connection-status">● Connecté</div>
+    </div>
+
+    <!-- TON CONTENU ORIGINAL -->
+    <div class="container">
+        <header class="header">
+            <h1>📚 TELC Sprachbausteine</h1>
+            <p class="subtitle">Évaluation en ligne - Teil 2</p>
+        </header>
+
+        <div id="exerciseContainer" class="exercise-container">
+            <div class="progress-info">
+                <span id="progressText">0/0 questions répondues</span>
+            </div>
+            
+            <!-- Les sections seront générées par le JS ou sont statiques, je garde ta structure -->
+            <!-- Exercice 1 -->
+            <div class="exercise-section" data-exercise="0">
+                <div class="exercise-header">
+                    <div class="exercise-number">
+                        <span class="icon">🐕</span>
+                        <h2>Exercice 1</h2>
+                    </div>
+                    <button class="btn-collapse" data-target="0"><span class="collapse-icon">−</span></button>
+                </div>
+                <div class="exercise-content" id="exerciseContent0">
+                    <h3 class="exercise-title" id="exerciseTitle0"></h3>
+                    <div class="instructions" id="instructions0"></div>
+                    <div class="text-container" id="textContainer0"></div>
+                    <div class="questions-container" id="questionsContainer0"></div>
+                </div>
+            </div>
+
+            <!-- Exercice 2 -->
+            <div class="exercise-section" data-exercise="1">
+                <div class="exercise-header">
+                    <div class="exercise-number">
+                        <span class="icon">💬</span>
+                        <h2>Exercice 2</h2>
+                    </div>
+                    <button class="btn-collapse" data-target="1"><span class="collapse-icon">−</span></button>
+                </div>
+                <div class="exercise-content" id="exerciseContent1">
+                    <h3 class="exercise-title" id="exerciseTitle1"></h3>
+                    <div class="instructions" id="instructions1"></div>
+                    <div class="text-container" id="textContainer1"></div>
+                    <div class="questions-container" id="questionsContainer1"></div>
+                </div>
+            </div>
+
+            <button id="submitBtn" class="btn-submit">Soumettre mes réponses</button>
+        </div>
+
+        <div id="resultsContainer" class="results-container hidden">
+            <div class="results-header">
+                <div class="score-circle" id="scoreCircle">
+                    <span class="score-number" id="scoreNumber">0</span>
+                    <span class="score-total">/10</span>
+                </div>
+                <h2 id="resultsTitle"></h2>
+                <p id="resultsMessage"></p>
+            </div>
+            <div class="results-details" id="resultsDetails"></div>
+            <div class="results-actions">
+                <button id="reviewBtn" class="btn-review">Revoir les exercices</button>
+                <button id="restartBtn" class="btn-new">Recommencer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPT DE CONNEXION SOCKET + DONNÉES -->
+    <script>
+        // Passage des variables Python vers JS
+        window.studentIdentity = {
+            nom: "{{ nom }}",
+            numero: "{{ numero }}",
+            option: "{{ option }}"
+        };
+
+        const socket = io('/etudiant');
+        socket.on('connect', () => {
+            console.log("Connecté Socket B2");
+            socket.emit('student_login', window.studentIdentity);
+        });
+    </script>
+
+    <!-- TES SCRIPTS (Chargés depuis static) -->
+    <script src="{{ url_for('static', filename='B2/data.js') }}"></script>
+    <script src="{{ url_for('static', filename='B2/script.js') }}"></script>
+</body>
+</html>
