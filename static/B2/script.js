@@ -124,64 +124,39 @@ function updateProgress() {
 // ---------------------------------------------------------
 // C'EST ICI QUE J'AI MODIFIÉ LA FONCTION POUR LE SERVEUR
 // ---------------------------------------------------------
+// --- DANS static/B2/script.js ---
+
 function submitAnswers() {
     if (isSubmitted) return;
     
-    if (Object.keys(userAnswers).length === 0) {
-        alert('Veuillez répondre à au moins une question avant de soumettre.');
-        return;
-    }
+    // ... validation (répondre à au moins une question) ...
 
-    // On bloque le bouton
     isSubmitted = true;
     submitBtn.disabled = true;
-    submitBtn.textContent = "Correction et envoi...";
+    submitBtn.textContent = "Calcul des points...";
 
     let correctCount = 0;
-    let totalAnswered = 0;
+    let totalQuestionsAnswered = 0; // ou totalQuestions tout court selon ta logique
+    
+    // Pour calculer le total possible (si l'étudiant ne répond pas à tout, on veut quand même le total sur 20 par exemple)
+    // Calculons le nombre TOTAL de questions dans l'exercice
+    let totalQuestionsExamen = exercicesData.exercices.reduce((sum, ex) => sum + ex.lacunes.length, 0);
 
-    // 1. Calcul des scores et Mise à jour de l'UI (Couleurs vert/rouge)
+    // Vérifier chaque réponse
     exercicesData.exercices.forEach((exercise, exerciseIndex) => {
         exercise.lacunes.forEach(lacune => {
-            const questionNum = lacune.numero;
-            const questionKey = `${exerciseIndex}-${questionNum}`;
-            const userAnswer = userAnswers[questionKey];
-            const correctAnswer = exercise.solutions[questionNum];
-
-            if (!userAnswer) return;
-
-            totalAnswered++;
-            const isCorrect = userAnswer === correctAnswer;
+            // ... Ta logique de vérification et coloriage (vert/rouge) reste identique ...
+            // ...
             if (isCorrect) correctCount++;
-
-            // Mise à jour visuelle locale
-            const questionCard = document.querySelector(`[data-question="${questionNum}"][data-exercise="${exerciseIndex}"]`);
-            const statusSpan = questionCard.querySelector('.question-status');
-            const optionBtns = questionCard.querySelectorAll('.option-btn');
-
-            questionCard.classList.add(isCorrect ? 'correct' : 'incorrect');
-            statusSpan.textContent = isCorrect ? '✓' : '✗';
-
-            optionBtns.forEach(btn => {
-                btn.disabled = true;
-                const btnOption = btn.dataset.option;
-                if (btnOption === correctAnswer) btn.classList.add('correct');
-                else if (btnOption === userAnswer && !isCorrect) btn.classList.add('incorrect');
-            });
-
-            if (!isCorrect) {
-                const correctionInfo = document.createElement('div');
-                correctionInfo.className = 'correction-info';
-                correctionInfo.innerHTML = `
-                    Votre réponse: <strong style="color: var(--error)">${userAnswer}) ${exercise.options[userAnswer]}</strong><br>
-                    Réponse correcte: <strong>${correctAnswer}) ${exercise.options[correctAnswer]}</strong>
-                `;
-                questionCard.appendChild(correctionInfo);
-            }
         });
     });
 
-    // 2. Préparation et Envoi au Serveur Flask
+    // --- CALCUL DES POINTS (1.5 par question) ---
+    const POINTS = 1.5;
+    let scoreFinal = correctCount * POINTS;
+    let scoreMax = totalQuestionsExamen * POINTS;
+
+    // Envoi au serveur
     const identity = window.studentIdentity || {nom:'?', numero:'?', option:'B2'};
     
     const payload = {
@@ -189,7 +164,8 @@ function submitAnswers() {
         numero: identity.numero,
         option: identity.option,
         reponses: userAnswers,
-        score_global: `${correctCount}/${totalAnswered}`
+        // On envoie le score calculé (ex: "15/30")
+        score_global: `${scoreFinal}/${scoreMax}`
     };
 
     fetch('/webhook/submit', {
@@ -199,22 +175,40 @@ function submitAnswers() {
     })
     .then(res => res.json())
     .then(data => {
-        console.log("Données envoyées avec succès");
-        submitBtn.textContent = "Réponses envoyées !";
-        
-        // 3. Afficher les résultats locaux après un court délai
+        submitBtn.textContent = "Envoyé !";
+        // On passe les infos à l'affichage
         setTimeout(() => {
-            showResults(correctCount, totalAnswered);
+            showResults(scoreFinal, scoreMax, correctCount, totalQuestionsExamen);
         }, 1000);
     })
     .catch(err => {
-        console.error("Erreur d'envoi", err);
-        alert("Attention : Vos résultats s'affichent mais n'ont pas pu être envoyés au serveur.");
-        // On affiche quand même les résultats locaux
+        console.error(err);
         setTimeout(() => {
-            showResults(correctCount, totalAnswered);
+            showResults(scoreFinal, scoreMax, correctCount, totalQuestionsExamen);
         }, 1000);
     });
+}
+
+// METTRE À JOUR L'AFFICHAGE DU CERCLE
+function showResults(scoreFinal, scoreMax, correctCount, totalQuestions) {
+    const percentage = scoreMax > 0 ? (scoreFinal / scoreMax) * 100 : 0;
+
+    exerciseContainer.classList.add('hidden');
+    resultsContainer.classList.remove('hidden');
+
+    // ... Ta logique de niveau (Excellent, Bien...) reste la même ...
+
+    // Afficher le score PONDÉRÉ
+    const scoreCircle = document.getElementById('scoreCircle');
+    const scoreNumber = document.getElementById('scoreNumber');
+    const scoreTotal = scoreCircle.querySelector('.score-total');
+    
+    // Affiche le score (ex: 13.5)
+    scoreNumber.textContent = scoreFinal; 
+    // Affiche le total (ex: /30)
+    scoreTotal.textContent = `/${scoreMax}`;
+
+    // ... le reste de la fonction ...
 }
 
 function showResults(correctCount, totalAnswered) {

@@ -142,65 +142,98 @@ function saveAnswer(examIndex, questionNum, answer) {
 }
 
 // Soumettre TOUS les examens
+// --- DANS static/B1/script.js ---
+
 function submitAllExams() {
-    // 1. Correction Locale (Ton code original)
+    // 1. Correction Locale
     examResults = {};
-    let totalCorrect = 0;
-    let totalQuestions = 0;
-    
+    let totalCorrectQuestions = 0;
+    let totalQuestionsCount = 0;
+    const POINTS_PAR_QUESTION = 1.5; // <--- CHANGEMENT ICI
+
     // Corriger chaque examen
     examData.exercices.forEach((exam, examIndex) => {
         correctExam(examIndex);
-        // Compter les points pour le score global
         if(examResults[examIndex]) {
             Object.values(examResults[examIndex]).forEach(res => {
-                totalQuestions++;
-                if(res.isCorrect) totalCorrect++;
+                totalQuestionsCount++;
+                if(res.isCorrect) totalCorrectQuestions++;
             });
         }
     });
 
-    // 2. Préparation de l'envoi au serveur
+    // 2. Calcul du Score pondéré
+    // Ex: Si 10 justes : 10 * 1.5 = 15 points
+    let scoreFinal = totalCorrectQuestions * POINTS_PAR_QUESTION;
+    let noteMax = totalQuestionsCount * POINTS_PAR_QUESTION;
+
+    // 3. Préparation de l'envoi
     const submitButton = document.getElementById('submit-btn');
     submitButton.disabled = true;
     submitButton.textContent = "Envoi en cours...";
 
-    // On récupère l'identité définie dans le HTML
     const identity = window.studentIdentity || { nom: "Inconnu", numero: "000", option: "B1" };
 
     const payload = {
         nom: identity.nom,
         numero: identity.numero,
         option: identity.option,
-        reponses: userAnswers,           // Les réponses brutes
-        details: examResults,            // Les détails correction
-        score_global: `${totalCorrect}/${totalQuestions}` // Score format string
+        reponses: userAnswers,
+        details: examResults,
+        // On envoie le score formaté (ex: "22.5/30")
+        score_global: `${scoreFinal}/${noteMax}` 
     };
 
-    // 3. Envoi via Webhook (Fetch)
+    // 4. Envoi Webhook
     fetch('/webhook/submit', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     })
     .then(response => response.json())
     .then(data => {
-        console.log('Succès:', data);
         submitButton.textContent = "Réponses envoyées !";
-        
-        // 4. Afficher les résultats locaux (Ton code original)
-        displayGlobalResults();
+        // On passe les scores calculés à la fonction d'affichage
+        displayGlobalResults(scoreFinal, noteMax, totalCorrectQuestions, totalQuestionsCount);
     })
     .catch((error) => {
         console.error('Erreur:', error);
-        alert("Erreur de connexion au serveur. Vérifiez que le serveur Python tourne.");
+        alert("Erreur de connexion.");
         submitButton.disabled = false;
-        submitButton.textContent = "Réessayer de soumettre";
     });
 }
 
+// IL FAUT AUSSI ADAPTER L'AFFICHAGE LOCAL
+// Remplace le début de displayGlobalResults par ceci :
+function displayGlobalResults(scoreFinal, noteMax, correctCount, totalCount) {
+    // Si la fonction est appelée sans arguments (rechargement), on recalcule vite fait (optionnel)
+    if(scoreFinal === undefined) {
+        scoreFinal = 0; noteMax = 0; 
+        // ... logique de repli si besoin, mais normalement submitAllExams envoie tout
+    }
+
+    const percentage = noteMax > 0 ? Math.round((scoreFinal / noteMax) * 100) : 0;
+    const container = document.getElementById('results-container');
+    
+    // ... le reste de ta logique de feedback (Excellent, Bien, etc.) ...
+    
+    let html = `
+        <div class="results-header">
+            <h2>📊 Résultats Finaux</h2>
+            <!-- Affichage Note sur 1.5 -->
+            <div class="score">${scoreFinal} / ${noteMax}</div>
+            <div class="percentage">${percentage}%</div>
+            <div class="stats">
+                Questions correctes : <strong>${correctCount}/${totalCount}</strong>
+            </div>
+            <!-- ... -->
+        </div>
+    `;
+    // ... suite de la fonction ...
+    container.innerHTML = html;
+    container.classList.remove('hidden');
+    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 // Corriger un examen spécifique
 function correctExam(examIndex) {

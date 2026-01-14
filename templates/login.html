@@ -2,34 +2,262 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Connexion à l'examen</title>
     <style>
-        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f2f5; }
-        .login-card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; }
-        input, select, button { width: 100%; padding: 10px; margin-bottom: 15px; box-sizing: border-box; }
-        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
-        button:hover { background: #0056b3; }
-        h2 { text-align: center; color: #333; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: moveBackground 20s linear infinite;
+        }
+
+        @keyframes moveBackground {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(50px, 50px); }
+        }
+
+        .login-container {
+            width: 100%;
+            max-width: 420px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .login-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 40px 30px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            margin-bottom: 15px;
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        h2 {
+            text-align: center;
+            color: #1a1a2e;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            color: #374151;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            padding-left: 4px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 15px;
+            transition: all 0.3s ease;
+            background: #f9fafb;
+            color: #1a1a2e;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+            transform: translateY(-1px);
+        }
+
+        input::placeholder {
+            color: #9ca3af;
+        }
+
+        select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236b7280' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            padding-right: 45px;
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+            margin-top: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .security-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 20px;
+            color: #6b7280;
+            font-size: 12px;
+        }
+
+        .security-badge::before {
+            content: '🔒';
+            font-size: 14px;
+        }
+
+        @media (max-width: 480px) {
+            .login-card {
+                padding: 30px 20px;
+                border-radius: 16px;
+            }
+
+            h2 {
+                font-size: 24px;
+            }
+
+            .logo-icon {
+                width: 50px;
+                height: 50px;
+                font-size: 24px;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="login-card">
-        <h2>Identification</h2>
-        <form method="POST" action="/">
-            <label>Nom complet</label>
-            <input type="text" name="nom" required placeholder="Ex: Jean Dupont">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="logo">
+                <div class="logo-icon">📝</div>
+                <h2>Identification</h2>
+                <p class="subtitle">Veuillez vous identifier pour accéder à l'examen</p>
+            </div>
             
-            <label>Numéro étudiant</label>
-            <input type="text" name="numero" required placeholder="Ex: 123456">
-            
-            <label>Votre Option</label>
-            <select name="option">
-                <option value="B1">Option B1 (Débutant)</option>
-                <option value="B2">Option B2 (Avancé)</option>
-            </select>
-            
-            <button type="submit">Commencer l'exercice</button>
-        </form>
+            <form method="POST" action="/">
+                <div class="form-group">
+                    <label for="nom">Nom complet</label>
+                    <input 
+                        type="text" 
+                        id="nom" 
+                        name="nom" 
+                        required 
+                        placeholder="Ex: Jean Dupont"
+                        autocomplete="name"
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label for="numero">Numéro étudiant</label>
+                    <input 
+                        type="text" 
+                        id="numero" 
+                        name="numero" 
+                        required 
+                        placeholder="Ex: 123456"
+                        autocomplete="off"
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label for="option">Votre Option</label>
+                    <select id="option" name="option">
+                        <option value="B1">Option B1 (Débutant)</option>
+                        <option value="B2">Option B2 (Avancé)</option>
+                    </select>
+                </div>
+                
+                <button type="submit">Commencer l'exercice</button>
+                
+                <div class="security-badge">
+                    Connexion sécurisée
+                </div>
+            </form>
+        </div>
     </div>
 </body>
 </html>
