@@ -1,3 +1,7 @@
+import eventlet
+# Cette ligne doit être la TOUTE PREMIÈRE ligne de code exécutée
+eventlet.monkey_patch()
+
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 from datetime import datetime
